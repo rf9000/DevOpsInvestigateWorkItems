@@ -6,6 +6,12 @@ function todayISO(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+function nowUTCPlus1(): string {
+  const now = new Date();
+  now.setHours(now.getUTCHours() + 1);
+  return now.toISOString();
+}
+
 export class StateStore {
   private filePath: string;
   private state: ProcessedState;
@@ -40,12 +46,14 @@ export class StateStore {
       lastRunAt: '',
       dailyInvestigationCount: 0,
       dailyCountDate: '',
+      createdAfter: nowUTCPlus1(),
     };
   }
 
   save(): void {
     mkdirSync(dirname(this.filePath), { recursive: true });
     this.state.lastRunAt = new Date().toISOString();
+    this.state.createdAfter = nowUTCPlus1();
     writeFileSync(this.filePath, JSON.stringify(this.state, null, 2), 'utf-8');
   }
 
@@ -88,9 +96,14 @@ export class StateStore {
       lastRunAt: '',
       dailyInvestigationCount: 0,
       dailyCountDate: '',
+      createdAfter: nowUTCPlus1(),
     };
     this.processedSet = new Set();
     this.save();
+  }
+
+  get createdAfter(): string {
+    return this.state.createdAfter;
   }
 
   get processedCount(): number {

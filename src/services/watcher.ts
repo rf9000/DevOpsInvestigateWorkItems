@@ -10,6 +10,7 @@ export interface WatcherDeps {
   queryBugsUnderFeatures: (
     config: AppConfig,
     featureIds: number[],
+    createdAfter?: string,
   ) => Promise<number[]>;
 
   processBug: (
@@ -33,9 +34,9 @@ export async function runPollCycle(
   stateStore: StateStore,
   deps: WatcherDeps = defaultDeps,
 ): Promise<{ investigated: number; skipped: number; errors: number }> {
-  // 1. Query bugs under feature IDs
-  log(`Querying bugs under feature IDs: ${config.featureWorkItemIds.join(', ')}...`);
-  const bugIds = await deps.queryBugsUnderFeatures(config, config.featureWorkItemIds);
+  // 1. Query bugs under feature IDs (only created after last run)
+  log(`Querying work items under feature IDs: ${config.featureWorkItemIds.join(', ')} (created after ${stateStore.createdAfter})...`);
+  const bugIds = await deps.queryBugsUnderFeatures(config, config.featureWorkItemIds, stateStore.createdAfter);
   const newBugIds = bugIds.filter((id) => !stateStore.isProcessed(id));
 
   log(`Found ${bugIds.length} bugs, ${newBugIds.length} unprocessed`);
