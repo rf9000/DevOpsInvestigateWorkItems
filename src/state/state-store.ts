@@ -2,15 +2,19 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'fs';
 import { dirname, join } from 'path';
 import type { ProcessedState } from '../types/index.ts';
 
+function todayISO(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 export class StateStore {
   private filePath: string;
   private state: ProcessedState;
   private processedSet: Set<number>;
 
   constructor(stateDir: string) {
-    this.filePath = join(stateDir, 'processed-prs.json');
+    this.filePath = join(stateDir, 'processed-bugs.json');
     this.state = this.load();
-    this.processedSet = new Set(this.state.processedPRIds);
+    this.processedSet = new Set(this.state.processedBugIds);
   }
 
   private load(): ProcessedState {
@@ -22,8 +26,8 @@ export class StateStore {
         if (
           parsed !== null &&
           typeof parsed === 'object' &&
-          'processedPRIds' in parsed &&
-          Array.isArray((parsed as ProcessedState).processedPRIds)
+          'processedBugIds' in parsed &&
+          Array.isArray((parsed as ProcessedState).processedBugIds)
         ) {
           return parsed as ProcessedState;
         }
@@ -31,7 +35,13 @@ export class StateStore {
     } catch {
       // file doesn't exist or is corrupted JSON — start fresh
     }
-    return { processedPRIds: [], lastRunAt: '' };
+    return {
+      processedBugIds: [],
+      lastRunAt: '',
+      dailyInvestigationCount: 0,
+      dailyCountDate: '',
+      lastRepoPullAt: '',
+    };
   }
 
   save(): void {
@@ -40,24 +50,60 @@ export class StateStore {
     writeFileSync(this.filePath, JSON.stringify(this.state, null, 2), 'utf-8');
   }
 
-  isProcessed(prId: number): boolean {
-    return this.processedSet.has(prId);
+  isProcessed(bugId: number): boolean {
+    return this.processedSet.has(bugId);
   }
 
-  markProcessed(prId: number): void {
-    if (!this.processedSet.has(prId)) {
-      this.processedSet.add(prId);
-      this.state.processedPRIds.push(prId);
+  markProcessed(bugId: number): void {
+    if (!this.processedSet.has(bugId)) {
+      this.processedSet.add(bugId);
+      this.state.processedBugIds.push(bugId);
     }
   }
 
+  canInvestigateToday(max: number): boolean {
+    const today = todayISO();
+    if (this.state.dailyCountDate !== today) {
+      this.state.dailyInvestigationCount = 0;
+      this.state.dailyCountDate = today;
+    }
+    return this.state.dailyInvestigationCount < max;
+  }
+
+  incrementDailyCount(): void {
+    const today = todayISO();
+    if (this.state.dailyCountDate !== today) {
+      this.state.dailyInvestigationCount = 0;
+      this.state.dailyCountDate = today;
+    }
+    this.state.dailyInvestigationCount++;
+  }
+
+  get dailyInvestigationCount(): number {
+    return this.state.dailyInvestigationCount;
+  }
+
+  getLastRepoPullAt(): string | null {
+    return this.state.lastRepoPullAt || null;
+  }
+
+  markRepoPulled(): void {
+    this.state.lastRepoPullAt = new Date().toISOString();
+  }
+
   reset(): void {
-    this.state = { processedPRIds: [], lastRunAt: '' };
+    this.state = {
+      processedBugIds: [],
+      lastRunAt: '',
+      dailyInvestigationCount: 0,
+      dailyCountDate: '',
+      lastRepoPullAt: '',
+    };
     this.processedSet = new Set();
     this.save();
   }
 
   get processedCount(): number {
-    return this.state.processedPRIds.length;
+    return this.state.processedBugIds.length;
   }
 }

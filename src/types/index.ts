@@ -4,33 +4,15 @@ export interface AppConfig {
   orgUrl: string;
   project: string;
   pat: string;
-  repoIds: string[];
+  featureWorkItemIds: number[];
+  targetRepoPath: string;
+  maxInvestigationsPerDay: number;
+  skillsDir: string;
   pollIntervalMinutes: number;
   claudeModel: string;
   promptPath: string;
   stateDir: string;
   dryRun: boolean;
-}
-
-/** Shape returned by the Azure DevOps Pull Request API. */
-export interface AzureDevOpsPullRequest {
-  pullRequestId: number;
-  title: string;
-  description: string;
-  status: string;
-  creationDate: string;
-  closedDate: string;
-  sourceRefName: string;
-  targetRefName: string;
-  lastMergeSourceCommit: { commitId: string };
-  lastMergeTargetCommit: { commitId: string };
-  repository: { id: string; name: string };
-}
-
-/** Reference to a work item linked to a pull request. */
-export interface PRWorkItemRef {
-  id: string;
-  url: string;
 }
 
 /** Response shape when fetching a single work item. */
@@ -41,27 +23,45 @@ export interface WorkItemResponse {
   url: string;
 }
 
-/** A single change entry inside a diff response. */
-export interface DiffChange {
-  item: { path: string };
-  changeType: string;
-}
-
-/** Response shape for a commit diff query. */
-export interface DiffResponse {
-  changes: DiffChange[];
-}
-
-/** Persisted state tracking which PRs have already been processed. */
+/** Persisted state tracking which bugs have already been processed. */
 export interface ProcessedState {
-  processedPRIds: number[];
+  processedBugIds: number[];
   lastRunAt: string;
+  dailyInvestigationCount: number;
+  dailyCountDate: string;
+  lastRepoPullAt: string;
 }
 
-/** Result summary after processing a single pull request. */
-export interface PRProcessResult {
-  prId: number;
-  processed: number;
-  skipped: number;
-  errors: number;
+/** A bug work item fetched from Azure DevOps. */
+export interface BugWorkItem {
+  id: number;
+  title: string;
+  description: string;
+  reproSteps: string;
+  state: string;
+  areaPath: string;
+  assignedTo: string;
+}
+
+/** Structured result from a bug investigation. */
+export interface InvestigationResult {
+  bugId: number;
+  isValid: boolean | 'uncertain';
+  rootCause: string;
+  reproduction: string;
+  fixSuggestion: string;
+  ambiguities: string[];
+}
+
+/** Result summary after processing a single bug. */
+export interface BugProcessResult {
+  bugId: number;
+  investigated: boolean;
+  error?: string;
+}
+
+/** A skill loaded from the skills directory. */
+export interface Skill {
+  name: string;
+  content: string;
 }

@@ -5,7 +5,10 @@ const envSchema = z.object({
   AZURE_DEVOPS_PAT: z.string().min(1, "AZURE_DEVOPS_PAT is required"),
   AZURE_DEVOPS_ORG: z.string().min(1, "AZURE_DEVOPS_ORG is required"),
   AZURE_DEVOPS_PROJECT: z.string().min(1, "AZURE_DEVOPS_PROJECT is required"),
-  AZURE_DEVOPS_REPO_IDS: z.string().min(1, "AZURE_DEVOPS_REPO_IDS is required"),
+  FEATURE_WORK_ITEM_IDS: z.string().min(1, "FEATURE_WORK_ITEM_IDS is required"),
+  TARGET_REPO_PATH: z.string().min(1, "TARGET_REPO_PATH is required"),
+  MAX_INVESTIGATIONS_PER_DAY: z.coerce.number().default(5),
+  SKILLS_DIR: z.string().default(".claude/commands"),
   POLL_INTERVAL_MINUTES: z.coerce.number().default(15),
   CLAUDE_MODEL: z.string().default("claude-sonnet-4-6"),
   PROMPT_PATH: z.string().default(".claude/commands/do-process-item.md"),
@@ -26,17 +29,27 @@ export function loadConfig(
 
   const parsed = result.data;
 
-  const repoIds = parsed.AZURE_DEVOPS_REPO_IDS
+  const featureWorkItemIds = parsed.FEATURE_WORK_ITEM_IDS
     .split(",")
     .map((id) => id.trim())
-    .filter((id) => id.length > 0);
+    .filter((id) => id.length > 0)
+    .map((id) => {
+      const num = Number(id);
+      if (isNaN(num)) {
+        throw new Error(`Invalid feature work item ID: "${id}" is not a number`);
+      }
+      return num;
+    });
 
   return {
     org: parsed.AZURE_DEVOPS_ORG,
     orgUrl: `https://dev.azure.com/${parsed.AZURE_DEVOPS_ORG}`,
     project: parsed.AZURE_DEVOPS_PROJECT,
     pat: parsed.AZURE_DEVOPS_PAT,
-    repoIds,
+    featureWorkItemIds,
+    targetRepoPath: parsed.TARGET_REPO_PATH,
+    maxInvestigationsPerDay: parsed.MAX_INVESTIGATIONS_PER_DAY,
+    skillsDir: parsed.SKILLS_DIR,
     pollIntervalMinutes: parsed.POLL_INTERVAL_MINUTES,
     claudeModel: parsed.CLAUDE_MODEL,
     promptPath: parsed.PROMPT_PATH,

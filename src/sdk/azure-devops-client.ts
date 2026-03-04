@@ -1,9 +1,6 @@
 import type {
   AppConfig,
-  AzureDevOpsPullRequest,
-  PRWorkItemRef,
   WorkItemResponse,
-  DiffResponse,
 } from '../types/index.ts';
 
 export class AzureDevOpsError extends Error {
@@ -84,58 +81,12 @@ export async function adoFetchWithRetry<T>(
   throw new Error('adoFetchWithRetry: unexpected code path');
 }
 
-export async function listCompletedPRs(
-  config: AppConfig,
-  repoId: string,
-  top = 50,
-): Promise<AzureDevOpsPullRequest[]> {
-  const path = `git/repositories/${repoId}/pullrequests?searchCriteria.status=completed&$top=${top}&api-version=7.0`;
-  const data = await adoFetchWithRetry<{ value: AzureDevOpsPullRequest[] }>(
-    config,
-    path,
-  );
-  return data.value;
-}
-
-export async function getPullRequest(
-  config: AppConfig,
-  repoId: string,
-  prId: number,
-): Promise<AzureDevOpsPullRequest> {
-  const path = `git/repositories/${repoId}/pullrequests/${prId}?api-version=7.0`;
-  return adoFetchWithRetry<AzureDevOpsPullRequest>(config, path);
-}
-
-export async function getPRWorkItems(
-  config: AppConfig,
-  repoId: string,
-  prId: number,
-): Promise<PRWorkItemRef[]> {
-  const path = `git/repositories/${repoId}/pullrequests/${prId}/workitems?api-version=7.0`;
-  const data = await adoFetchWithRetry<{ value: PRWorkItemRef[] }>(
-    config,
-    path,
-  );
-  return data.value;
-}
-
 export async function getWorkItem(
   config: AppConfig,
   workItemId: number,
 ): Promise<WorkItemResponse> {
   const path = `wit/workitems/${workItemId}?$expand=all&api-version=7.0`;
   return adoFetchWithRetry<WorkItemResponse>(config, path);
-}
-
-export async function getPRChangedFiles(
-  config: AppConfig,
-  repoId: string,
-  baseCommit: string,
-  targetCommit: string,
-): Promise<string[]> {
-  const path = `git/repositories/${repoId}/diffs/commits?baseVersion=${baseCommit}&targetVersion=${targetCommit}&api-version=7.0`;
-  const data = await adoFetchWithRetry<DiffResponse>(config, path);
-  return data.changes.map((c) => c.item.path);
 }
 
 export async function updateWorkItemField(
@@ -149,5 +100,54 @@ export async function updateWorkItemField(
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json-patch+json' },
     body: JSON.stringify([{ op: 'add', path: `/fields/${fieldName}`, value }]),
+  });
+}
+
+interface WiqlWorkItemLink {
+  target: { id: number };
+}
+
+interface WiqlResponse {
+  workItemRelations: WiqlWorkItemLink[];
+}
+
+export async function queryBugsUnderFeatures(
+  config: AppConfig,
+  featureIds: number[],
+): Promise<number[]> {
+  const idList = featureIds.join(',');
+  const wiql = `SELECT [System.Id] FROM WorkItemLinks WHERE [Source].[System.Id] IN (${idList}) AND [Target].[System.WorkItemType] = 'Bug' AND [Target].[System.State] NOT IN ('Resolved', 'Closed') MODE (MustContain)`;
+
+  const path = 'wit/wiql?api-version=7.0';
+  const data = await adoFetchWithRetry<WiqlResponse>(config, path, {
+    method: 'POST',
+    body: JSON.stringify({ query: wiql }),
+  });
+
+  const bugIds: number[] = [];
+  for (const rel of data.workItemRelations ?? []) {
+    if (rel.target?.id) {
+      bugIds.push(rel.target.id);
+    }
+  }
+
+  // Deduplicate
+  return [...new Set(bugIds)];
+}
+
+interface CommentResponse {
+  id: number;
+  text: string;
+}
+
+export async function addWorkItemComment(
+  config: AppConfig,
+  workItemId: number,
+  commentHtml: string,
+): Promise<CommentResponse> {
+  const path = `wit/workitems/${workItemId}/comments?api-version=7.0-preview.4`;
+  return adoFetchWithRetry<CommentResponse>(config, path, {
+    method: 'POST',
+    body: JSON.stringify({ text: commentHtml }),
   });
 }

@@ -2,7 +2,7 @@ import { describe, test, expect, mock, beforeEach, afterEach } from 'bun:test';
 import { mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import type { AppConfig, AzureDevOpsPullRequest } from '../../src/types/index.ts';
+import type { AppConfig } from '../../src/types/index.ts';
 import { runPollCycle } from '../../src/services/watcher.ts';
 import type { WatcherDeps } from '../../src/services/watcher.ts';
 import { StateStore } from '../../src/state/state-store.ts';
@@ -13,7 +13,10 @@ function mockConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     orgUrl: 'https://dev.azure.com/my-org',
     project: 'my-project',
     pat: 'test-pat-token',
-    repoIds: ['repo-1'],
+    featureWorkItemIds: [12345],
+    targetRepoPath: 'C:/repos/my-repo',
+    maxInvestigationsPerDay: 5,
+    skillsDir: '.claude/commands',
     pollIntervalMinutes: 5,
     claudeModel: 'claude-sonnet-4-6',
     promptPath: './prompt.md',
@@ -23,29 +26,14 @@ function mockConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   };
 }
 
-function mockPR(overrides: Partial<AzureDevOpsPullRequest> = {}): AzureDevOpsPullRequest {
-  return {
-    pullRequestId: 42,
-    title: 'Add new feature',
-    description: 'Adds a great new feature to the system',
-    status: 'completed',
-    creationDate: '2025-01-01T00:00:00Z',
-    closedDate: '2025-01-02T00:00:00Z',
-    sourceRefName: 'refs/heads/feature/new-feature',
-    targetRefName: 'refs/heads/main',
-    lastMergeSourceCommit: { commitId: 'source-commit-abc' },
-    lastMergeTargetCommit: { commitId: 'target-commit-def' },
-    repository: { id: 'repo-1', name: 'my-repo' },
-    ...overrides,
-  };
-}
-
 function makeDeps(overrides: Partial<WatcherDeps> = {}): WatcherDeps {
   return {
-    listCompletedPRs: mock(() => Promise.resolve([])),
-    processPR: mock(() =>
-      Promise.resolve({ prId: 0, processed: 0, skipped: 0, errors: 0 }),
+    queryBugsUnderFeatures: mock(() => Promise.resolve([])),
+    processBug: mock(() =>
+      Promise.resolve({ bugId: 0, investigated: true }),
     ),
+    shouldPullRepo: mock(() => false),
+    pullRepo: mock(() => Promise.resolve()),
     ...overrides,
   };
 }
@@ -63,120 +51,149 @@ describe('runPollCycle', () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  test('no new PRs returns all zeros', async () => {
+  test('no new bugs returns all zeros', async () => {
     const config = mockConfig();
     const deps = makeDeps({
-      listCompletedPRs: mock(() => Promise.resolve([])),
+      queryBugsUnderFeatures: mock(() => Promise.resolve([])),
     });
 
     const result = await runPollCycle(config, stateStore, deps);
 
-    expect(result).toEqual({ processed: 0, skipped: 0, errors: 0 });
-    expect(deps.listCompletedPRs).toHaveBeenCalledTimes(1);
-    expect(deps.processPR).toHaveBeenCalledTimes(0);
+    expect(result).toEqual({ investigated: 0, skipped: 0, errors: 0 });
+    expect(deps.queryBugsUnderFeatures).toHaveBeenCalledTimes(1);
+    expect(deps.processBug).toHaveBeenCalledTimes(0);
   });
 
-  test('new PR found calls processPR, marks as processed, and saves state', async () => {
+  test('new bug found calls processBug, marks as processed, and saves state', async () => {
     const config = mockConfig();
-    const pr = mockPR({ pullRequestId: 101 });
 
     const deps = makeDeps({
-      listCompletedPRs: mock(() => Promise.resolve([pr])),
-      processPR: mock(() =>
-        Promise.resolve({ prId: 101, processed: 1, skipped: 0, errors: 0 }),
+      queryBugsUnderFeatures: mock(() => Promise.resolve([101])),
+      processBug: mock(() =>
+        Promise.resolve({ bugId: 101, investigated: true }),
       ),
     });
 
     const result = await runPollCycle(config, stateStore, deps);
 
-    expect(result).toEqual({ processed: 1, skipped: 0, errors: 0 });
-    expect(deps.processPR).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ investigated: 1, skipped: 0, errors: 0 });
+    expect(deps.processBug).toHaveBeenCalledTimes(1);
     expect(stateStore.isProcessed(101)).toBe(true);
 
     const reloadedStore = new StateStore(tmpDir);
     expect(reloadedStore.isProcessed(101)).toBe(true);
   });
 
-  test('already processed PR is filtered out', async () => {
+  test('already processed bug is filtered out', async () => {
     const config = mockConfig();
-    const pr = mockPR({ pullRequestId: 200 });
 
     stateStore.markProcessed(200);
     stateStore.save();
 
     const deps = makeDeps({
-      listCompletedPRs: mock(() => Promise.resolve([pr])),
+      queryBugsUnderFeatures: mock(() => Promise.resolve([200])),
     });
 
     const result = await runPollCycle(config, stateStore, deps);
 
-    expect(result).toEqual({ processed: 0, skipped: 0, errors: 0 });
-    expect(deps.processPR).toHaveBeenCalledTimes(0);
+    expect(result).toEqual({ investigated: 0, skipped: 0, errors: 0 });
+    expect(deps.processBug).toHaveBeenCalledTimes(0);
   });
 
-  test('processPR throws: PR not marked as processed, error counted', async () => {
+  test('processBug throws: bug not marked as processed, error counted', async () => {
     const config = mockConfig();
-    const pr = mockPR({ pullRequestId: 300 });
 
     const deps = makeDeps({
-      listCompletedPRs: mock(() => Promise.resolve([pr])),
-      processPR: mock(() => Promise.reject(new Error('Fatal processing error'))),
+      queryBugsUnderFeatures: mock(() => Promise.resolve([300])),
+      processBug: mock(() => Promise.reject(new Error('Fatal processing error'))),
     });
 
     const result = await runPollCycle(config, stateStore, deps);
 
-    expect(result).toEqual({ processed: 0, skipped: 0, errors: 1 });
+    expect(result).toEqual({ investigated: 0, skipped: 0, errors: 1 });
     expect(stateStore.isProcessed(300)).toBe(false);
   });
 
-  test('PR with errors in result is not marked as processed', async () => {
+  test('bug with investigation failure is not marked as processed', async () => {
     const config = mockConfig();
-    const pr = mockPR({ pullRequestId: 400 });
 
     const deps = makeDeps({
-      listCompletedPRs: mock(() => Promise.resolve([pr])),
-      processPR: mock(() =>
-        Promise.resolve({ prId: 400, processed: 0, skipped: 0, errors: 1 }),
+      queryBugsUnderFeatures: mock(() => Promise.resolve([400])),
+      processBug: mock(() =>
+        Promise.resolve({ bugId: 400, investigated: false, error: 'AI failed' }),
       ),
     });
 
     const result = await runPollCycle(config, stateStore, deps);
 
-    expect(result).toEqual({ processed: 0, skipped: 0, errors: 1 });
+    expect(result).toEqual({ investigated: 0, skipped: 0, errors: 1 });
     expect(stateStore.isProcessed(400)).toBe(false);
   });
 
-  test('multiple repos polls each one', async () => {
-    const config = mockConfig({ repoIds: ['repo-a', 'repo-b', 'repo-c'] });
-
-    const prA = mockPR({
-      pullRequestId: 501,
-      repository: { id: 'repo-a', name: 'repo-a' },
-    });
-    const prB = mockPR({
-      pullRequestId: 502,
-      repository: { id: 'repo-b', name: 'repo-b' },
-    });
-
-    const listMock = mock((cfg: AppConfig, repoId: string) => {
-      if (repoId === 'repo-a') return Promise.resolve([prA]);
-      if (repoId === 'repo-b') return Promise.resolve([prB]);
-      return Promise.resolve([]);
-    });
+  test('daily limit stops processing remaining bugs', async () => {
+    const config = mockConfig({ maxInvestigationsPerDay: 2 });
 
     const deps = makeDeps({
-      listCompletedPRs: listMock,
-      processPR: mock(() =>
-        Promise.resolve({ prId: 0, processed: 1, skipped: 0, errors: 0 }),
+      queryBugsUnderFeatures: mock(() => Promise.resolve([501, 502, 503, 504])),
+      processBug: mock((cfg: AppConfig, bugId: number) =>
+        Promise.resolve({ bugId, investigated: true }),
       ),
     });
 
     const result = await runPollCycle(config, stateStore, deps);
 
-    expect(result).toEqual({ processed: 2, skipped: 0, errors: 0 });
-    expect(deps.listCompletedPRs).toHaveBeenCalledTimes(3);
-    expect(deps.processPR).toHaveBeenCalledTimes(2);
+    expect(result.investigated).toBe(2);
+    expect(result.skipped).toBe(2);
+    expect(result.errors).toBe(0);
+    expect(deps.processBug).toHaveBeenCalledTimes(2);
     expect(stateStore.isProcessed(501)).toBe(true);
     expect(stateStore.isProcessed(502)).toBe(true);
+    expect(stateStore.isProcessed(503)).toBe(false);
+  });
+
+  test('repo pull is triggered when shouldPullRepo returns true', async () => {
+    const config = mockConfig();
+
+    const deps = makeDeps({
+      shouldPullRepo: mock(() => true),
+      pullRepo: mock(() => Promise.resolve()),
+      queryBugsUnderFeatures: mock(() => Promise.resolve([])),
+    });
+
+    await runPollCycle(config, stateStore, deps);
+
+    expect(deps.pullRepo).toHaveBeenCalledTimes(1);
+  });
+
+  test('repo pull is skipped when shouldPullRepo returns false', async () => {
+    const config = mockConfig();
+
+    const deps = makeDeps({
+      shouldPullRepo: mock(() => false),
+      pullRepo: mock(() => Promise.resolve()),
+      queryBugsUnderFeatures: mock(() => Promise.resolve([])),
+    });
+
+    await runPollCycle(config, stateStore, deps);
+
+    expect(deps.pullRepo).toHaveBeenCalledTimes(0);
+  });
+
+  test('repo pull failure does not prevent bug processing', async () => {
+    const config = mockConfig();
+
+    const deps = makeDeps({
+      shouldPullRepo: mock(() => true),
+      pullRepo: mock(() => Promise.reject(new Error('git pull failed'))),
+      queryBugsUnderFeatures: mock(() => Promise.resolve([601])),
+      processBug: mock(() =>
+        Promise.resolve({ bugId: 601, investigated: true }),
+      ),
+    });
+
+    const result = await runPollCycle(config, stateStore, deps);
+
+    expect(result.investigated).toBe(1);
+    expect(stateStore.isProcessed(601)).toBe(true);
   });
 });

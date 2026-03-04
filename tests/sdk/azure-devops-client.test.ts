@@ -4,11 +4,10 @@ import {
   AzureDevOpsError,
   adoFetch,
   adoFetchWithRetry,
-  listCompletedPRs,
-  getPRWorkItems,
   getWorkItem,
-  getPRChangedFiles,
   updateWorkItemField,
+  queryBugsUnderFeatures,
+  addWorkItemComment,
 } from '../../src/sdk/azure-devops-client.ts';
 
 const originalFetch = globalThis.fetch;
@@ -20,7 +19,10 @@ function mockConfig(): AppConfig {
     orgUrl: 'https://dev.azure.com/my-org',
     project: 'my-project',
     pat: 'test-pat-token',
-    repoIds: ['repo-1'],
+    featureWorkItemIds: [12345],
+    targetRepoPath: 'C:/repos/my-repo',
+    maxInvestigationsPerDay: 5,
+    skillsDir: '.claude/commands',
     pollIntervalMinutes: 5,
     claudeModel: 'claude-sonnet-4-6',
     promptPath: './prompt.md',
@@ -163,46 +165,6 @@ describe('adoFetchWithRetry', () => {
   });
 });
 
-describe('listCompletedPRs', () => {
-  test('builds correct URL and returns value array', async () => {
-    const prs = [
-      { pullRequestId: 1, title: 'PR 1' },
-      { pullRequestId: 2, title: 'PR 2' },
-    ];
-    setMockFetch({ value: prs });
-    const config = mockConfig();
-
-    const result = await listCompletedPRs(config, 'repo-1', 10);
-
-    expect(result as unknown[]).toEqual(prs);
-    const url = mockFn.mock.calls[0]![0] as string;
-    expect(url).toContain('git/repositories/repo-1/pullrequests');
-    expect(url).toContain('searchCriteria.status=completed');
-    expect(url).toContain('$top=10');
-    expect(url).toContain('api-version=7.0');
-  });
-});
-
-describe('getPRWorkItems', () => {
-  test('builds correct URL and returns value array', async () => {
-    const items = [
-      { id: '100', url: 'https://example.com/100' },
-      { id: '200', url: 'https://example.com/200' },
-    ];
-    setMockFetch({ value: items });
-    const config = mockConfig();
-
-    const result = await getPRWorkItems(config, 'repo-1', 42);
-
-    expect(result).toEqual(items);
-    const url = mockFn.mock.calls[0]![0] as string;
-    expect(url).toContain(
-      'git/repositories/repo-1/pullrequests/42/workitems',
-    );
-    expect(url).toContain('api-version=7.0');
-  });
-});
-
 describe('getWorkItem', () => {
   test('builds correct URL and returns work item directly', async () => {
     const workItem = {
@@ -220,33 +182,6 @@ describe('getWorkItem', () => {
     const url = mockFn.mock.calls[0]![0] as string;
     expect(url).toContain('wit/workitems/100');
     expect(url).toContain('$expand=all');
-    expect(url).toContain('api-version=7.0');
-  });
-});
-
-describe('getPRChangedFiles', () => {
-  test('extracts file paths from changes', async () => {
-    const diff = {
-      changes: [
-        { item: { path: '/src/index.ts' }, changeType: 'edit' },
-        { item: { path: '/README.md' }, changeType: 'add' },
-      ],
-    };
-    setMockFetch(diff);
-    const config = mockConfig();
-
-    const result = await getPRChangedFiles(
-      config,
-      'repo-1',
-      'abc123',
-      'def456',
-    );
-
-    expect(result).toEqual(['/src/index.ts', '/README.md']);
-    const url = mockFn.mock.calls[0]![0] as string;
-    expect(url).toContain('git/repositories/repo-1/diffs/commits');
-    expect(url).toContain('baseVersion=abc123');
-    expect(url).toContain('targetVersion=def456');
     expect(url).toContain('api-version=7.0');
   });
 });
@@ -293,13 +228,91 @@ describe('updateWorkItemField', () => {
   });
 });
 
+describe('queryBugsUnderFeatures', () => {
+  test('sends WIQL POST and extracts bug IDs from relations', async () => {
+    const wiqlResponse = {
+      workItemRelations: [
+        { source: { id: 12345 }, target: { id: 100 }, rel: 'System.LinkTypes.Hierarchy-Forward' },
+        { source: { id: 12345 }, target: { id: 200 }, rel: 'System.LinkTypes.Hierarchy-Forward' },
+        { source: null, target: { id: 12345 }, rel: null },
+      ],
+    };
+    setMockFetch(wiqlResponse);
+    const config = mockConfig();
+
+    const result = await queryBugsUnderFeatures(config, [12345, 67890]);
+
+    expect(result).toEqual([100, 200, 12345]);
+
+    const call = mockFn.mock.calls[0]!;
+    const url = call[0] as string;
+    const init = call[1] as RequestInit;
+
+    expect(url).toContain('wit/wiql');
+    expect(url).toContain('api-version=7.0');
+    expect(init.method).toBe('POST');
+
+    const body = JSON.parse(init.body as string) as { query: string };
+    expect(body.query).toContain('12345,67890');
+    expect(body.query).toContain("'Bug'");
+    expect(body.query).toContain('NOT IN');
+  });
+
+  test('deduplicates bug IDs', async () => {
+    const wiqlResponse = {
+      workItemRelations: [
+        { source: { id: 12345 }, target: { id: 100 }, rel: null },
+        { source: { id: 67890 }, target: { id: 100 }, rel: null },
+      ],
+    };
+    setMockFetch(wiqlResponse);
+    const config = mockConfig();
+
+    const result = await queryBugsUnderFeatures(config, [12345, 67890]);
+
+    expect(result).toEqual([100]);
+  });
+
+  test('returns empty array when no relations found', async () => {
+    setMockFetch({ workItemRelations: [] });
+    const config = mockConfig();
+
+    const result = await queryBugsUnderFeatures(config, [12345]);
+
+    expect(result).toEqual([]);
+  });
+});
+
+describe('addWorkItemComment', () => {
+  test('sends POST with comment text', async () => {
+    const commentResponse = { id: 1, text: '<p>Investigation result</p>' };
+    setMockFetch(commentResponse);
+    const config = mockConfig();
+
+    const result = await addWorkItemComment(config, 100, '<p>Investigation result</p>');
+
+    expect(result).toEqual(commentResponse);
+
+    const call = mockFn.mock.calls[0]!;
+    const url = call[0] as string;
+    const init = call[1] as RequestInit;
+
+    expect(url).toContain('wit/workitems/100/comments');
+    expect(url).toContain('api-version=7.0-preview.4');
+    expect(init.method).toBe('POST');
+
+    const body = JSON.parse(init.body as string) as { text: string };
+    expect(body.text).toBe('<p>Investigation result</p>');
+  });
+});
+
 describe('error handling', () => {
   test('404 throws AzureDevOpsError with statusCode', async () => {
     setMockFetch({ message: 'Resource not found' }, 404, 'Not Found');
     const config = mockConfig();
 
     try {
-      await listCompletedPRs(config, 'no-such-repo');
+      await getWorkItem(config, 99999);
       throw new Error('should have thrown');
     } catch (err) {
       expect(err).toBeInstanceOf(AzureDevOpsError);

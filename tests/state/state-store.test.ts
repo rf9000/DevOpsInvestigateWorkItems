@@ -9,7 +9,7 @@ function makeTmpDir(): string {
 }
 
 describe('StateStore', () => {
-  it('save + load roundtrip preserves processed PRs', () => {
+  it('save + load roundtrip preserves processed bugs', () => {
     const dir = makeTmpDir();
     const store = new StateStore(dir);
 
@@ -37,7 +37,7 @@ describe('StateStore', () => {
 
   it('starts fresh when the state file contains corrupt JSON', () => {
     const dir = makeTmpDir();
-    const filePath = join(dir, 'processed-prs.json');
+    const filePath = join(dir, 'processed-bugs.json');
     writeFileSync(filePath, '{{not valid json!!!', 'utf-8');
 
     const store = new StateStore(dir);
@@ -46,7 +46,7 @@ describe('StateStore', () => {
     expect(store.isProcessed(1)).toBe(false);
   });
 
-  it('does not duplicate when marking the same PR twice', () => {
+  it('does not duplicate when marking the same bug twice', () => {
     const dir = makeTmpDir();
     const store = new StateStore(dir);
 
@@ -99,5 +99,86 @@ describe('StateStore', () => {
 
     store.markProcessed(3);
     expect(store.processedCount).toBe(3);
+  });
+
+  it('canInvestigateToday returns true when under limit', () => {
+    const dir = makeTmpDir();
+    const store = new StateStore(dir);
+
+    expect(store.canInvestigateToday(5)).toBe(true);
+  });
+
+  it('canInvestigateToday returns false when at limit', () => {
+    const dir = makeTmpDir();
+    const store = new StateStore(dir);
+
+    for (let i = 0; i < 5; i++) {
+      store.incrementDailyCount();
+    }
+
+    expect(store.canInvestigateToday(5)).toBe(false);
+  });
+
+  it('incrementDailyCount increments the counter', () => {
+    const dir = makeTmpDir();
+    const store = new StateStore(dir);
+
+    expect(store.dailyInvestigationCount).toBe(0);
+    store.incrementDailyCount();
+    expect(store.dailyInvestigationCount).toBe(1);
+    store.incrementDailyCount();
+    expect(store.dailyInvestigationCount).toBe(2);
+  });
+
+  it('daily count persists across save/load', () => {
+    const dir = makeTmpDir();
+    const store = new StateStore(dir);
+
+    store.incrementDailyCount();
+    store.incrementDailyCount();
+    store.incrementDailyCount();
+    // Trigger date to be set by calling canInvestigateToday
+    store.canInvestigateToday(10);
+    store.save();
+
+    const store2 = new StateStore(dir);
+    // The count should persist (assuming same day)
+    expect(store2.dailyInvestigationCount).toBe(3);
+  });
+
+  it('getLastRepoPullAt returns null when never pulled', () => {
+    const dir = makeTmpDir();
+    const store = new StateStore(dir);
+
+    expect(store.getLastRepoPullAt()).toBeNull();
+  });
+
+  it('markRepoPulled sets timestamp and persists', () => {
+    const dir = makeTmpDir();
+    const store = new StateStore(dir);
+
+    store.markRepoPulled();
+    store.save();
+
+    const pullAt = store.getLastRepoPullAt();
+    expect(pullAt).not.toBeNull();
+    expect(new Date(pullAt!).getTime()).toBeGreaterThan(0);
+
+    const store2 = new StateStore(dir);
+    expect(store2.getLastRepoPullAt()).toBe(pullAt);
+  });
+
+  it('reset clears daily count and repo pull state', () => {
+    const dir = makeTmpDir();
+    const store = new StateStore(dir);
+
+    store.incrementDailyCount();
+    store.markRepoPulled();
+    store.save();
+
+    store.reset();
+
+    expect(store.dailyInvestigationCount).toBe(0);
+    expect(store.getLastRepoPullAt()).toBeNull();
   });
 });

@@ -1,28 +1,33 @@
 import type {
   AppConfig,
-  AzureDevOpsPullRequest,
-  PRProcessResult,
+  BugProcessResult,
 } from '../types/index.ts';
 import { StateStore } from '../state/state-store.ts';
 import * as sdk from '../sdk/azure-devops-client.ts';
 import * as proc from './processor.ts';
+import * as repoSync from './repo-sync.ts';
 
 export interface WatcherDeps {
-  listCompletedPRs: (
+  queryBugsUnderFeatures: (
     config: AppConfig,
-    repoId: string,
-    top?: number,
-  ) => Promise<AzureDevOpsPullRequest[]>;
+    featureIds: number[],
+  ) => Promise<number[]>;
 
-  processPR: (
+  processBug: (
     config: AppConfig,
-    pr: AzureDevOpsPullRequest,
-  ) => Promise<PRProcessResult>;
+    bugId: number,
+  ) => Promise<BugProcessResult>;
+
+  shouldPullRepo: (lastPullAt: string | null) => boolean;
+
+  pullRepo: (repoPath: string) => Promise<void>;
 }
 
 const defaultDeps: WatcherDeps = {
-  listCompletedPRs: sdk.listCompletedPRs,
-  processPR: proc.processPR,
+  queryBugsUnderFeatures: sdk.queryBugsUnderFeatures,
+  processBug: proc.processBug,
+  shouldPullRepo: repoSync.shouldPullRepo,
+  pullRepo: repoSync.pullRepo,
 };
 
 function log(message: string): void {
@@ -34,42 +39,58 @@ export async function runPollCycle(
   config: AppConfig,
   stateStore: StateStore,
   deps: WatcherDeps = defaultDeps,
-): Promise<{ processed: number; skipped: number; errors: number }> {
-  let totalProcessed = 0;
-  let totalSkipped = 0;
-  let totalErrors = 0;
+): Promise<{ investigated: number; skipped: number; errors: number }> {
+  // 1. Check if repo needs pulling
+  if (deps.shouldPullRepo(stateStore.getLastRepoPullAt())) {
+    try {
+      await deps.pullRepo(config.targetRepoPath);
+      stateStore.markRepoPulled();
+    } catch (err) {
+      log(`Warning: repo pull failed — ${err}`);
+    }
+  }
 
-  for (const repoId of config.repoIds) {
-    log(`Polling repo ${repoId}...`);
+  // 2. Query bugs under feature IDs
+  log(`Querying bugs under feature IDs: ${config.featureWorkItemIds.join(', ')}...`);
+  const bugIds = await deps.queryBugsUnderFeatures(config, config.featureWorkItemIds);
+  const newBugIds = bugIds.filter((id) => !stateStore.isProcessed(id));
 
-    const prs = await deps.listCompletedPRs(config, repoId);
-    const newPRs = prs.filter(pr => !stateStore.isProcessed(pr.pullRequestId));
+  log(`Found ${bugIds.length} bugs, ${newBugIds.length} unprocessed`);
 
-    log(`  Found ${prs.length} completed PRs, ${newPRs.length} unprocessed`);
+  let investigated = 0;
+  let skipped = 0;
+  let errors = 0;
 
-    for (const pr of newPRs) {
-      try {
-        const result = await deps.processPR(config, pr);
-        totalProcessed += result.processed;
-        totalSkipped += result.skipped;
-        totalErrors += result.errors;
+  for (const bugId of newBugIds) {
+    // 3. Check daily limit
+    if (!stateStore.canInvestigateToday(config.maxInvestigationsPerDay)) {
+      log(`Daily investigation limit reached (${config.maxInvestigationsPerDay}). Skipping remaining bugs.`);
+      skipped += newBugIds.length - (investigated + errors);
+      break;
+    }
 
-        if (result.errors === 0) {
-          stateStore.markProcessed(pr.pullRequestId);
-        }
-      } catch (err) {
-        log(`  PR #${pr.pullRequestId}: Fatal error — ${err}`);
-        totalErrors++;
+    try {
+      const result = await deps.processBug(config, bugId);
+
+      if (result.investigated) {
+        stateStore.markProcessed(bugId);
+        stateStore.incrementDailyCount();
+        investigated++;
+      } else {
+        errors++;
       }
+    } catch (err) {
+      log(`Bug #${bugId}: Fatal error — ${err}`);
+      errors++;
     }
   }
 
   stateStore.save();
-  return { processed: totalProcessed, skipped: totalSkipped, errors: totalErrors };
+  return { investigated, skipped, errors };
 }
 
 function sleep(ms: number, signal: { aborted: boolean }): Promise<void> {
-  return new Promise(resolve => {
+  return new Promise((resolve) => {
     const checkInterval = 1000;
     let elapsed = 0;
     const timer = setInterval(() => {
@@ -94,13 +115,14 @@ export async function startWatcher(config: AppConfig): Promise<void> {
   process.on('SIGTERM', shutdown);
 
   log(`Starting watcher — polling every ${config.pollIntervalMinutes} minutes`);
-  log(`Watching ${config.repoIds.length} repo(s)`);
-  log(`${stateStore.processedCount} PRs already processed`);
+  log(`Watching feature IDs: ${config.featureWorkItemIds.join(', ')}`);
+  log(`${stateStore.processedCount} bugs already processed`);
+  log(`Max ${config.maxInvestigationsPerDay} investigations per day`);
 
   while (!signal.aborted) {
     try {
       const result = await runPollCycle(config, stateStore);
-      log(`Cycle complete: ${result.processed} processed, ${result.skipped} skipped, ${result.errors} errors`);
+      log(`Cycle complete: ${result.investigated} investigated, ${result.skipped} skipped, ${result.errors} errors`);
     } catch (err) {
       log(`Cycle failed: ${err}`);
     }

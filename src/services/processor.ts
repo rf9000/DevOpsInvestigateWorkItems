@@ -1,53 +1,40 @@
 import type {
   AppConfig,
-  AzureDevOpsPullRequest,
-  PRProcessResult,
-  PRWorkItemRef,
+  BugProcessResult,
   WorkItemResponse,
+  Skill,
 } from '../types/index.ts';
-import type { GeneratorContext } from './ai-generator.ts';
+import type { InvestigationContext } from './investigator.ts';
 
 import * as sdk from '../sdk/azure-devops-client.ts';
-import * as gen from './ai-generator.ts';
+import * as inv from './investigator.ts';
+import * as sl from './skill-loader.ts';
 
 export interface ProcessorDeps {
-  getPRWorkItems: (
-    config: AppConfig,
-    repoId: string,
-    prId: number,
-  ) => Promise<PRWorkItemRef[]>;
-
   getWorkItem: (
     config: AppConfig,
     workItemId: number,
   ) => Promise<WorkItemResponse>;
 
-  getPRChangedFiles: (
+  investigateBug: (
     config: AppConfig,
-    repoId: string,
-    baseCommit: string,
-    targetCommit: string,
-  ) => Promise<string[]>;
+    context: InvestigationContext,
+  ) => Promise<string>;
 
-  updateWorkItemField: (
+  addWorkItemComment: (
     config: AppConfig,
     workItemId: number,
-    fieldName: string,
-    value: string,
-  ) => Promise<WorkItemResponse>;
+    commentHtml: string,
+  ) => Promise<unknown>;
 
-  generateWithAI: (
-    config: AppConfig,
-    context: GeneratorContext,
-  ) => Promise<string>;
+  loadSkills: (skillsDir: string) => Promise<Skill[]>;
 }
 
 const defaultDeps: ProcessorDeps = {
-  getPRWorkItems: sdk.getPRWorkItems,
   getWorkItem: sdk.getWorkItem,
-  getPRChangedFiles: sdk.getPRChangedFiles,
-  updateWorkItemField: sdk.updateWorkItemField,
-  generateWithAI: gen.generateWithAI,
+  investigateBug: inv.investigateBug,
+  addWorkItemComment: sdk.addWorkItemComment,
+  loadSkills: sl.loadSkills,
 };
 
 function log(message: string): void {
@@ -55,91 +42,48 @@ function log(message: string): void {
   console.log(`[${ts}] ${message}`);
 }
 
-// TODO: Replace this stub with your project-specific processing logic.
-// This example processes work items linked to completed PRs and generates
-// AI-powered summaries. Adapt the field checks, generation context, and
-// update logic to match your use case.
-
-export async function processPR(
+export async function processBug(
   config: AppConfig,
-  pr: AzureDevOpsPullRequest,
+  bugId: number,
   deps: ProcessorDeps = defaultDeps,
-): Promise<PRProcessResult> {
-  const result: PRProcessResult = {
-    prId: pr.pullRequestId,
-    processed: 0,
-    skipped: 0,
-    errors: 0,
-  };
+): Promise<BugProcessResult> {
+  log(`Processing Bug #${bugId}...`);
 
-  log(`Processing PR #${pr.pullRequestId}: ${pr.title}`);
-
-  const workItemRefs = await deps.getPRWorkItems(
-    config,
-    pr.repository.id,
-    pr.pullRequestId,
-  );
-
-  if (workItemRefs.length === 0) {
-    log(`  PR #${pr.pullRequestId}: No linked work items, skipping`);
-    return result;
-  }
-
-  let changedFiles: string[] = [];
   try {
-    changedFiles = await deps.getPRChangedFiles(
-      config,
-      pr.repository.id,
-      pr.lastMergeTargetCommit.commitId,
-      pr.lastMergeSourceCommit.commitId,
+    const workItem = await deps.getWorkItem(config, bugId);
+
+    const bugTitle = String(workItem.fields['System.Title'] ?? '');
+    const bugDescription = String(workItem.fields['System.Description'] ?? '');
+    const bugReproSteps = String(
+      workItem.fields['Microsoft.VSTS.TCM.ReproSteps'] ?? '',
     );
-  } catch (err) {
-    log(
-      `  PR #${pr.pullRequestId}: Warning — could not fetch changed files: ${err}`,
-    );
-  }
 
-  for (const ref of workItemRefs) {
-    const workItemId = Number(ref.id);
-    try {
-      const workItem = await deps.getWorkItem(config, workItemId);
+    log(`  Bug #${bugId}: "${bugTitle}"`);
 
-      const workItemTitle = String(workItem.fields['System.Title'] ?? '');
-      const workItemType = String(
-        workItem.fields['System.WorkItemType'] ?? '',
-      );
+    const skills = await deps.loadSkills(config.skillsDir);
 
-      const context: GeneratorContext = {
-        prTitle: pr.title,
-        prDescription: pr.description ?? '',
-        changedFiles,
-        workItemTitle,
-        workItemType,
-      };
+    const context: InvestigationContext = {
+      bugTitle,
+      bugDescription,
+      bugReproSteps,
+      skills,
+    };
 
-      log(`  WI #${workItemId}: Generating AI output...`);
-      const output = await deps.generateWithAI(config, context);
+    log(`  Bug #${bugId}: Starting investigation...`);
+    const output = await deps.investigateBug(config, context);
 
-      if (config.dryRun) {
-        log(`  WI #${workItemId}: [DRY RUN] Generated:\n    "${output}"`);
-        result.processed++;
-        continue;
-      }
-
-      // TODO: Replace 'System.Description' with the field you want to update
-      await deps.updateWorkItemField(
-        config,
-        workItemId,
-        'System.Description',
-        output,
-      );
-      log(`  WI #${workItemId}: Output written`);
-      result.processed++;
-    } catch (err) {
-      log(`  WI #${workItemId}: Error — ${err}`);
-      result.errors++;
+    if (config.dryRun) {
+      log(`  Bug #${bugId}: [DRY RUN] Investigation result:\n${output}`);
+      return { bugId, investigated: true };
     }
-  }
 
-  return result;
+    await deps.addWorkItemComment(config, bugId, output);
+    log(`  Bug #${bugId}: Investigation posted as comment`);
+
+    return { bugId, investigated: true };
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    log(`  Bug #${bugId}: Error — ${errorMsg}`);
+    return { bugId, investigated: false, error: errorMsg };
+  }
 }
