@@ -25,7 +25,8 @@ const defaultDeps: WatcherDeps = {
 };
 
 function log(message: string): void {
-  const ts = new Date().toISOString().replace('T', ' ').slice(0, 19);
+  const now = new Date(Date.now() + 60 * 60 * 1000);
+  const ts = now.toISOString().replace('T', ' ').slice(0, 19);
   console.log(`[${ts}] ${message}`);
 }
 
