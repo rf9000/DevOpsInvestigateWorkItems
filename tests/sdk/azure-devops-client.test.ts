@@ -23,6 +23,7 @@ function mockConfig(): AppConfig {
     targetRepoPath: 'C:/repos/my-repo',
     maxInvestigationsPerDay: 5,
     skillsDir: '.claude/commands',
+    assignedToFilter: [],
     pollIntervalMinutes: 5,
     claudeModel: 'claude-sonnet-4-6',
     promptPath: './prompt.md',
@@ -280,6 +281,30 @@ describe('queryBugsUnderFeatures', () => {
     const result = await queryBugsUnderFeatures(config, [12345]);
 
     expect(result).toEqual([]);
+  });
+
+  test('includes AssignedTo filter in WIQL when configured', async () => {
+    setMockFetch({ workItemRelations: [] });
+    const config = { ...mockConfig(), assignedToFilter: ['Alice Smith', 'Bob Jones'] };
+
+    await queryBugsUnderFeatures(config, [12345]);
+
+    const call = mockFn.mock.calls[0]!;
+    const init = call[1] as RequestInit;
+    const body = JSON.parse(init.body as string) as { query: string };
+    expect(body.query).toContain("[Target].[System.AssignedTo] IN ('Alice Smith', 'Bob Jones')");
+  });
+
+  test('omits AssignedTo filter when not configured', async () => {
+    setMockFetch({ workItemRelations: [] });
+    const config = mockConfig();
+
+    await queryBugsUnderFeatures(config, [12345]);
+
+    const call = mockFn.mock.calls[0]!;
+    const init = call[1] as RequestInit;
+    const body = JSON.parse(init.body as string) as { query: string };
+    expect(body.query).not.toContain('AssignedTo');
   });
 });
 

@@ -12,6 +12,7 @@ const envSchema = z.object({
   POLL_INTERVAL_MINUTES: z.coerce.number().default(15),
   CLAUDE_MODEL: z.string().default("claude-sonnet-4-6"),
   PROMPT_PATH: z.string().default(".claude/commands/do-process-item.md"),
+  ASSIGNED_TO_FILTER: z.string().optional(),
   STATE_DIR: z.string().default(".state"),
 });
 
@@ -41,6 +42,10 @@ export function loadConfig(
       return num;
     });
 
+  const assignedToFilter = parsed.ASSIGNED_TO_FILTER
+    ? parsed.ASSIGNED_TO_FILTER.split(",").map((s) => s.trim()).filter((s) => s.length > 0)
+    : [];
+
   return {
     org: parsed.AZURE_DEVOPS_ORG,
     orgUrl: `https://dev.azure.com/${parsed.AZURE_DEVOPS_ORG}`,
@@ -53,6 +58,7 @@ export function loadConfig(
     pollIntervalMinutes: parsed.POLL_INTERVAL_MINUTES,
     claudeModel: parsed.CLAUDE_MODEL,
     promptPath: parsed.PROMPT_PATH,
+    assignedToFilter,
     stateDir: parsed.STATE_DIR,
     dryRun: false,
   };

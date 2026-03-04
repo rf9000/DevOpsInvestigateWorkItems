@@ -59,6 +59,7 @@ describe("loadConfig", () => {
     expect(config.claudeModel).toBe("claude-sonnet-4-6");
     expect(config.promptPath).toBe(".claude/commands/do-process-item.md");
     expect(config.skillsDir).toBe(".claude/commands");
+    expect(config.assignedToFilter).toEqual([]);
     expect(config.stateDir).toBe(".state");
   });
 
@@ -110,6 +111,21 @@ describe("loadConfig", () => {
     };
 
     expect(() => loadConfig(env)).toThrow("not a number");
+  });
+
+  it("parses ASSIGNED_TO_FILTER into array", () => {
+    const env = {
+      ...validEnv,
+      ASSIGNED_TO_FILTER: "Alice Smith, Bob Jones",
+    };
+
+    const config = loadConfig(env);
+    expect(config.assignedToFilter).toEqual(["Alice Smith", "Bob Jones"]);
+  });
+
+  it("returns empty assignedToFilter when not set", () => {
+    const config = loadConfig(validEnv);
+    expect(config.assignedToFilter).toEqual([]);
   });
 
   it("derives orgUrl from org name", () => {

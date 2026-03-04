@@ -116,7 +116,14 @@ export async function queryBugsUnderFeatures(
   featureIds: number[],
 ): Promise<number[]> {
   const idList = featureIds.join(',');
-  const wiql = `SELECT [System.Id] FROM WorkItemLinks WHERE [Source].[System.Id] IN (${idList}) AND [Target].[System.WorkItemType] = 'Bug' AND [Target].[System.State] NOT IN ('Resolved', 'Closed') MODE (MustContain)`;
+  let wiql = `SELECT [System.Id] FROM WorkItemLinks WHERE [Source].[System.Id] IN (${idList}) AND [Target].[System.WorkItemType] = 'Bug' AND [Target].[System.State] NOT IN ('Resolved', 'Closed')`;
+
+  if (config.assignedToFilter.length > 0) {
+    const names = config.assignedToFilter.map((n) => `'${n}'`).join(', ');
+    wiql += ` AND [Target].[System.AssignedTo] IN (${names})`;
+  }
+
+  wiql += ' MODE (MustContain)';
 
   const path = 'wit/wiql?api-version=7.0';
   const data = await adoFetchWithRetry<WiqlResponse>(config, path, {

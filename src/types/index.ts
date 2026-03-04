@@ -11,6 +11,7 @@ export interface AppConfig {
   pollIntervalMinutes: number;
   claudeModel: string;
   promptPath: string;
+  assignedToFilter: string[];
   stateDir: string;
   dryRun: boolean;
 }

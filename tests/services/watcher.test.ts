@@ -17,6 +17,7 @@ function mockConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     targetRepoPath: 'C:/repos/my-repo',
     maxInvestigationsPerDay: 5,
     skillsDir: '.claude/commands',
+    assignedToFilter: [],
     pollIntervalMinutes: 5,
     claudeModel: 'claude-sonnet-4-6',
     promptPath: './prompt.md',
