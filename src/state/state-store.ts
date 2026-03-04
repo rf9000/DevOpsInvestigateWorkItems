@@ -40,7 +40,6 @@ export class StateStore {
       lastRunAt: '',
       dailyInvestigationCount: 0,
       dailyCountDate: '',
-      lastRepoPullAt: '',
     };
   }
 
@@ -83,21 +82,12 @@ export class StateStore {
     return this.state.dailyInvestigationCount;
   }
 
-  getLastRepoPullAt(): string | null {
-    return this.state.lastRepoPullAt || null;
-  }
-
-  markRepoPulled(): void {
-    this.state.lastRepoPullAt = new Date().toISOString();
-  }
-
   reset(): void {
     this.state = {
       processedBugIds: [],
       lastRunAt: '',
       dailyInvestigationCount: 0,
       dailyCountDate: '',
-      lastRepoPullAt: '',
     };
     this.processedSet = new Set();
     this.save();

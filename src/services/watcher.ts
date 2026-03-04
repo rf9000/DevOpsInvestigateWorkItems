@@ -5,7 +5,6 @@ import type {
 import { StateStore } from '../state/state-store.ts';
 import * as sdk from '../sdk/azure-devops-client.ts';
 import * as proc from './processor.ts';
-import * as repoSync from './repo-sync.ts';
 
 export interface WatcherDeps {
   queryBugsUnderFeatures: (
@@ -17,17 +16,11 @@ export interface WatcherDeps {
     config: AppConfig,
     bugId: number,
   ) => Promise<BugProcessResult>;
-
-  shouldPullRepo: (lastPullAt: string | null) => boolean;
-
-  pullRepo: (repoPath: string) => Promise<void>;
 }
 
 const defaultDeps: WatcherDeps = {
   queryBugsUnderFeatures: sdk.queryBugsUnderFeatures,
   processBug: proc.processBug,
-  shouldPullRepo: repoSync.shouldPullRepo,
-  pullRepo: repoSync.pullRepo,
 };
 
 function log(message: string): void {
@@ -40,17 +33,7 @@ export async function runPollCycle(
   stateStore: StateStore,
   deps: WatcherDeps = defaultDeps,
 ): Promise<{ investigated: number; skipped: number; errors: number }> {
-  // 1. Check if repo needs pulling
-  if (deps.shouldPullRepo(stateStore.getLastRepoPullAt())) {
-    try {
-      await deps.pullRepo(config.targetRepoPath);
-      stateStore.markRepoPulled();
-    } catch (err) {
-      log(`Warning: repo pull failed — ${err}`);
-    }
-  }
-
-  // 2. Query bugs under feature IDs
+  // 1. Query bugs under feature IDs
   log(`Querying bugs under feature IDs: ${config.featureWorkItemIds.join(', ')}...`);
   const bugIds = await deps.queryBugsUnderFeatures(config, config.featureWorkItemIds);
   const newBugIds = bugIds.filter((id) => !stateStore.isProcessed(id));

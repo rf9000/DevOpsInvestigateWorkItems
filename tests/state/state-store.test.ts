@@ -146,39 +146,15 @@ describe('StateStore', () => {
     expect(store2.dailyInvestigationCount).toBe(3);
   });
 
-  it('getLastRepoPullAt returns null when never pulled', () => {
-    const dir = makeTmpDir();
-    const store = new StateStore(dir);
-
-    expect(store.getLastRepoPullAt()).toBeNull();
-  });
-
-  it('markRepoPulled sets timestamp and persists', () => {
-    const dir = makeTmpDir();
-    const store = new StateStore(dir);
-
-    store.markRepoPulled();
-    store.save();
-
-    const pullAt = store.getLastRepoPullAt();
-    expect(pullAt).not.toBeNull();
-    expect(new Date(pullAt!).getTime()).toBeGreaterThan(0);
-
-    const store2 = new StateStore(dir);
-    expect(store2.getLastRepoPullAt()).toBe(pullAt);
-  });
-
-  it('reset clears daily count and repo pull state', () => {
+  it('reset clears daily count', () => {
     const dir = makeTmpDir();
     const store = new StateStore(dir);
 
     store.incrementDailyCount();
-    store.markRepoPulled();
     store.save();
 
     store.reset();
 
     expect(store.dailyInvestigationCount).toBe(0);
-    expect(store.getLastRepoPullAt()).toBeNull();
   });
 });

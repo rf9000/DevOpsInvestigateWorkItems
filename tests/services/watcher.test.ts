@@ -32,8 +32,6 @@ function makeDeps(overrides: Partial<WatcherDeps> = {}): WatcherDeps {
     processBug: mock(() =>
       Promise.resolve({ bugId: 0, investigated: true }),
     ),
-    shouldPullRepo: mock(() => false),
-    pullRepo: mock(() => Promise.resolve()),
     ...overrides,
   };
 }
@@ -151,49 +149,4 @@ describe('runPollCycle', () => {
     expect(stateStore.isProcessed(503)).toBe(false);
   });
 
-  test('repo pull is triggered when shouldPullRepo returns true', async () => {
-    const config = mockConfig();
-
-    const deps = makeDeps({
-      shouldPullRepo: mock(() => true),
-      pullRepo: mock(() => Promise.resolve()),
-      queryBugsUnderFeatures: mock(() => Promise.resolve([])),
-    });
-
-    await runPollCycle(config, stateStore, deps);
-
-    expect(deps.pullRepo).toHaveBeenCalledTimes(1);
-  });
-
-  test('repo pull is skipped when shouldPullRepo returns false', async () => {
-    const config = mockConfig();
-
-    const deps = makeDeps({
-      shouldPullRepo: mock(() => false),
-      pullRepo: mock(() => Promise.resolve()),
-      queryBugsUnderFeatures: mock(() => Promise.resolve([])),
-    });
-
-    await runPollCycle(config, stateStore, deps);
-
-    expect(deps.pullRepo).toHaveBeenCalledTimes(0);
-  });
-
-  test('repo pull failure does not prevent bug processing', async () => {
-    const config = mockConfig();
-
-    const deps = makeDeps({
-      shouldPullRepo: mock(() => true),
-      pullRepo: mock(() => Promise.reject(new Error('git pull failed'))),
-      queryBugsUnderFeatures: mock(() => Promise.resolve([601])),
-      processBug: mock(() =>
-        Promise.resolve({ bugId: 601, investigated: true }),
-      ),
-    });
-
-    const result = await runPollCycle(config, stateStore, deps);
-
-    expect(result.investigated).toBe(1);
-    expect(stateStore.isProcessed(601)).toBe(true);
-  });
 });
