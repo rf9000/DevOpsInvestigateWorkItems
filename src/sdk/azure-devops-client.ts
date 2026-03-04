@@ -131,9 +131,10 @@ export async function queryBugsUnderFeatures(
     body: JSON.stringify({ query: wiql }),
   });
 
+  const featureIdSet = new Set(featureIds);
   const bugIds: number[] = [];
   for (const rel of data.workItemRelations ?? []) {
-    if (rel.target?.id) {
+    if (rel.target?.id && !featureIdSet.has(rel.target.id)) {
       bugIds.push(rel.target.id);
     }
   }

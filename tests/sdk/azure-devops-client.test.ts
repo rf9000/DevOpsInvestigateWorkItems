@@ -243,7 +243,7 @@ describe('queryBugsUnderFeatures', () => {
 
     const result = await queryBugsUnderFeatures(config, [12345, 67890]);
 
-    expect(result).toEqual([100, 200, 12345]);
+    expect(result).toEqual([100, 200]);
 
     const call = mockFn.mock.calls[0]!;
     const url = call[0] as string;
