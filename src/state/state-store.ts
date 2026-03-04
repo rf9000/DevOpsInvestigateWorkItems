@@ -6,8 +6,10 @@ function todayISO(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function todayDateString(): string {
-  return new Date().toISOString().slice(0, 10);
+function todayDateStringUTCPlus1(): string {
+  const now = new Date();
+  const utcPlus1 = new Date(now.getTime() + 60 * 60 * 1000);
+  return utcPlus1.toISOString().slice(0, 10);
 }
 
 export class StateStore {
@@ -44,14 +46,14 @@ export class StateStore {
       lastRunAt: '',
       dailyInvestigationCount: 0,
       dailyCountDate: '',
-      createdAfter: todayDateString(),
+      createdAfter: todayDateStringUTCPlus1(),
     };
   }
 
   save(): void {
     mkdirSync(dirname(this.filePath), { recursive: true });
     this.state.lastRunAt = new Date().toISOString();
-    this.state.createdAfter = todayDateString();
+    this.state.createdAfter = todayDateStringUTCPlus1();
     writeFileSync(this.filePath, JSON.stringify(this.state, null, 2), 'utf-8');
   }
 
@@ -94,7 +96,7 @@ export class StateStore {
       lastRunAt: '',
       dailyInvestigationCount: 0,
       dailyCountDate: '',
-      createdAfter: todayDateString(),
+      createdAfter: todayDateStringUTCPlus1(),
     };
     this.processedSet = new Set();
     this.save();
