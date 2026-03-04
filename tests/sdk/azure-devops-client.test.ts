@@ -255,7 +255,7 @@ describe('queryBugsUnderFeatures', () => {
 
     const body = JSON.parse(init.body as string) as { query: string };
     expect(body.query).toContain('12345,67890');
-    expect(body.query).toContain("'Bug'");
+    expect(body.query).toContain("'Bug', 'User Story'");
     expect(body.query).toContain('NOT IN');
   });
 
