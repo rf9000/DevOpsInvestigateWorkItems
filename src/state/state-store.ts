@@ -100,6 +100,10 @@ export class StateStore {
     this.save();
   }
 
+  get isFirstRun(): boolean {
+    return this.state.lastRunAt === '';
+  }
+
   get createdAfter(): string {
     return this.state.createdAfter;
   }

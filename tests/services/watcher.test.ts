@@ -44,10 +44,33 @@ describe('runPollCycle', () => {
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), 'watcher-test-'));
     stateStore = new StateStore(tmpDir);
+    // Simulate a non-first-run state so seeding is skipped
+    stateStore.save();
   });
 
   afterEach(() => {
     rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('first run seeds existing items as processed without investigating', async () => {
+    // Create a fresh state store (first run = no lastRunAt)
+    const freshDir = mkdtempSync(join(tmpdir(), 'watcher-first-run-'));
+    const freshStore = new StateStore(freshDir);
+    const config = mockConfig();
+
+    const deps = makeDeps({
+      queryBugsUnderFeatures: mock(() => Promise.resolve([101, 102, 103])),
+    });
+
+    const result = await runPollCycle(config, freshStore, deps);
+
+    expect(result).toEqual({ investigated: 0, skipped: 3, errors: 0 });
+    expect(deps.processBug).toHaveBeenCalledTimes(0);
+    expect(freshStore.isProcessed(101)).toBe(true);
+    expect(freshStore.isProcessed(102)).toBe(true);
+    expect(freshStore.isProcessed(103)).toBe(true);
+
+    rmSync(freshDir, { recursive: true, force: true });
   });
 
   test('no new bugs returns all zeros', async () => {

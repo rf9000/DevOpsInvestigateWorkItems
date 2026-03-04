@@ -34,12 +34,24 @@ export async function runPollCycle(
   stateStore: StateStore,
   deps: WatcherDeps = defaultDeps,
 ): Promise<{ investigated: number; skipped: number; errors: number }> {
-  // 1. Query bugs under feature IDs (only created after last run)
+  // 1. On first run, seed existing items as already processed
+  if (stateStore.isFirstRun) {
+    log('First run detected — seeding existing work items as already processed...');
+    const existingIds = await deps.queryBugsUnderFeatures(config, config.featureWorkItemIds, stateStore.createdAfter);
+    for (const id of existingIds) {
+      stateStore.markProcessed(id);
+    }
+    stateStore.save();
+    log(`Seeded ${existingIds.length} existing work items. Future runs will only process new items.`);
+    return { investigated: 0, skipped: existingIds.length, errors: 0 };
+  }
+
+  // 2. Query work items under feature IDs (only created after last run)
   log(`Querying work items under feature IDs: ${config.featureWorkItemIds.join(', ')} (created after ${stateStore.createdAfter})...`);
   const bugIds = await deps.queryBugsUnderFeatures(config, config.featureWorkItemIds, stateStore.createdAfter);
   const newBugIds = bugIds.filter((id) => !stateStore.isProcessed(id));
 
-  log(`Found ${bugIds.length} bugs, ${newBugIds.length} unprocessed`);
+  log(`Found ${bugIds.length} work items, ${newBugIds.length} unprocessed`);
 
   let investigated = 0;
   let skipped = 0;
