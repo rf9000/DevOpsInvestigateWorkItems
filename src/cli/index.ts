@@ -14,6 +14,7 @@ Usage:
 Commands:
   watch            Start the long-running watcher (polls every N minutes)
   run-once         Run a single poll cycle and exit
+  run-bug <id>     Investigate a single bug and post results to Azure DevOps
   test-bug <id>    Investigate a single bug (dry-run, no writes)
   reset-state      Clear the processed bug state and exit
   help             Show this help message
@@ -54,6 +55,27 @@ switch (command) {
     const stateStore = new StateStore(config.stateDir);
     const result = await runPollCycle(config, stateStore);
     console.log(`Done: ${result.investigated} investigated, ${result.skipped} skipped, ${result.errors} errors`);
+    break;
+  }
+
+  case 'run-bug': {
+    const bugIdArg = process.argv[3];
+    if (!bugIdArg || isNaN(Number(bugIdArg))) {
+      console.error('Usage: devops-investigate run-bug <bug-id>');
+      process.exitCode = 1;
+      break;
+    }
+    const config = loadConfig();
+    config.dryRun = dryRun;
+    if (dryRun) console.log('[DRY RUN] No writes will be made to Azure DevOps\n');
+    console.log(`Investigating Bug #${bugIdArg}...\n`);
+    const result = await processBug(config, Number(bugIdArg));
+    if (result.investigated) {
+      console.log(`\nDone: Bug #${bugIdArg} investigated successfully`);
+    } else {
+      console.log(`\nFailed: ${result.error}`);
+      process.exitCode = 1;
+    }
     break;
   }
 

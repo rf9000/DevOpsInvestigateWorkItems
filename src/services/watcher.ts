@@ -10,7 +10,6 @@ export interface WatcherDeps {
   queryBugsUnderFeatures: (
     config: AppConfig,
     featureIds: number[],
-    createdAfter?: string,
   ) => Promise<number[]>;
 
   processBug: (
@@ -38,7 +37,7 @@ export async function runPollCycle(
   // 1. On first run, seed existing items as already processed
   if (stateStore.isFirstRun) {
     log('First run detected — seeding existing work items as already processed...');
-    const existingIds = await deps.queryBugsUnderFeatures(config, config.featureWorkItemIds, stateStore.createdAfter);
+    const existingIds = await deps.queryBugsUnderFeatures(config, config.featureWorkItemIds);
     for (const id of existingIds) {
       stateStore.markProcessed(id);
     }
@@ -47,9 +46,9 @@ export async function runPollCycle(
     return { investigated: 0, skipped: existingIds.length, errors: 0 };
   }
 
-  // 2. Query work items under feature IDs (only created after last run)
-  log(`Querying work items under feature IDs: ${config.featureWorkItemIds.join(', ')} (created after ${stateStore.createdAfter})...`);
-  const bugIds = await deps.queryBugsUnderFeatures(config, config.featureWorkItemIds, stateStore.createdAfter);
+  // 2. Query all open work items under feature IDs
+  log(`Querying work items under feature IDs: ${config.featureWorkItemIds.join(', ')}...`);
+  const bugIds = await deps.queryBugsUnderFeatures(config, config.featureWorkItemIds);
   const newBugIds = bugIds.filter((id) => !stateStore.isProcessed(id));
 
   log(`Found ${bugIds.length} work items, ${newBugIds.length} unprocessed`);
@@ -82,6 +81,7 @@ export async function runPollCycle(
     }
   }
 
+  stateStore.pruneProcessed(bugIds);
   stateStore.save();
   return { investigated, skipped, errors };
 }

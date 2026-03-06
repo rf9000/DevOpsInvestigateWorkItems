@@ -146,6 +146,41 @@ describe('StateStore', () => {
     expect(store2.dailyInvestigationCount).toBe(3);
   });
 
+  it('pruneProcessed removes IDs not in the current set', () => {
+    const dir = makeTmpDir();
+    const store = new StateStore(dir);
+
+    store.markProcessed(1);
+    store.markProcessed(2);
+    store.markProcessed(3);
+    store.markProcessed(4);
+
+    store.pruneProcessed([2, 4, 5]);
+
+    expect(store.isProcessed(1)).toBe(false);
+    expect(store.isProcessed(2)).toBe(true);
+    expect(store.isProcessed(3)).toBe(false);
+    expect(store.isProcessed(4)).toBe(true);
+    expect(store.processedCount).toBe(2);
+  });
+
+  it('pruneProcessed persists after save/load', () => {
+    const dir = makeTmpDir();
+    const store = new StateStore(dir);
+
+    store.markProcessed(10);
+    store.markProcessed(20);
+    store.markProcessed(30);
+    store.pruneProcessed([20]);
+    store.save();
+
+    const store2 = new StateStore(dir);
+    expect(store2.isProcessed(10)).toBe(false);
+    expect(store2.isProcessed(20)).toBe(true);
+    expect(store2.isProcessed(30)).toBe(false);
+    expect(store2.processedCount).toBe(1);
+  });
+
   it('reset clears daily count', () => {
     const dir = makeTmpDir();
     const store = new StateStore(dir);

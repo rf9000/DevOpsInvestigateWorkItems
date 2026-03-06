@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { buildUserPrompt, buildSystemPrompt } from '../../src/services/investigator.ts';
+import { buildUserPrompt, buildSystemPrompt, canUseTool } from '../../src/services/investigator.ts';
 import type { InvestigationContext } from '../../src/services/investigator.ts';
 import { writeFileSync, mkdtempSync } from 'fs';
 import { join } from 'path';
@@ -82,5 +82,108 @@ describe('buildSystemPrompt', () => {
     expect(result).toContain('Use TypeScript strict mode.');
     expect(result).toContain('### Skill: testing');
     expect(result).toContain('Always write unit tests.');
+  });
+});
+
+describe('canUseTool', () => {
+  test('allows read-only bash commands', async () => {
+    const safe = [
+      'cat src/index.ts',
+      'ls -la',
+      'git log --oneline -10',
+      'git status',
+      'git diff HEAD',
+      'grep -r "pattern" src/',
+      'find . -name "*.ts"',
+      'bun test',
+      'bun run typecheck',
+    ];
+    for (const command of safe) {
+      const result = await canUseTool('Bash', { command });
+      expect(result.behavior).toBe('allow');
+    }
+  });
+
+  test('denies destructive git commands', async () => {
+    const dangerous = [
+      'git push origin main',
+      'git commit -m "oops"',
+      'git merge feature',
+      'git rebase main',
+      'git reset --hard HEAD~1',
+      'git checkout -- .',
+      'git branch -D feature',
+      'git stash drop',
+      'git clean -fd',
+      'git tag -d v1.0',
+    ];
+    for (const command of dangerous) {
+      const result = await canUseTool('Bash', { command });
+      expect(result.behavior).toBe('deny');
+    }
+  });
+
+  test('denies file deletion commands', async () => {
+    const dangerous = [
+      'rm -rf src/',
+      'rm -r node_modules',
+      'rmdir build',
+    ];
+    for (const command of dangerous) {
+      const result = await canUseTool('Bash', { command });
+      expect(result.behavior).toBe('deny');
+    }
+  });
+
+  test('denies file write via redirect', async () => {
+    const result = await canUseTool('Bash', { command: 'echo "hack" > file.ts' });
+    expect(result.behavior).toBe('deny');
+  });
+
+  test('denies destructive curl commands', async () => {
+    const dangerous = [
+      'curl -X POST https://api.example.com/data',
+      'curl --data "payload" https://api.example.com',
+      'curl --request DELETE https://api.example.com/item',
+    ];
+    for (const command of dangerous) {
+      const result = await canUseTool('Bash', { command });
+      expect(result.behavior).toBe('deny');
+    }
+  });
+
+  test('denies package manager install/publish', async () => {
+    const dangerous = [
+      'npm install lodash',
+      'npm publish',
+      'bun add zod',
+      'bun remove zod',
+    ];
+    for (const command of dangerous) {
+      const result = await canUseTool('Bash', { command });
+      expect(result.behavior).toBe('deny');
+    }
+  });
+
+  test('denies az devops and gh PR commands', async () => {
+    const dangerous = [
+      'az devops configure --defaults',
+      'gh pr create --title "test"',
+      'gh issue close 42',
+    ];
+    for (const command of dangerous) {
+      const result = await canUseTool('Bash', { command });
+      expect(result.behavior).toBe('deny');
+    }
+  });
+
+  test('denies sed in-place edits', async () => {
+    const result = await canUseTool('Bash', { command: 'sed -i "s/old/new/" file.ts' });
+    expect(result.behavior).toBe('deny');
+  });
+
+  test('allows non-Bash tools without checking', async () => {
+    const result = await canUseTool('Read', { file_path: '/etc/passwd' });
+    expect(result.behavior).toBe('allow');
   });
 });

@@ -173,4 +173,25 @@ describe('runPollCycle', () => {
     expect(stateStore.isProcessed(503)).toBe(false);
   });
 
+  test('prunes processed IDs not returned by current query', async () => {
+    const config = mockConfig();
+
+    stateStore.markProcessed(100);
+    stateStore.markProcessed(200);
+    stateStore.save();
+
+    const deps = makeDeps({
+      queryBugsUnderFeatures: mock(() => Promise.resolve([200, 300])),
+      processBug: mock((cfg: AppConfig, bugId: number) =>
+        Promise.resolve({ bugId, investigated: true }),
+      ),
+    });
+
+    await runPollCycle(config, stateStore, deps);
+
+    expect(stateStore.isProcessed(100)).toBe(false);
+    expect(stateStore.isProcessed(200)).toBe(true);
+    expect(stateStore.isProcessed(300)).toBe(true);
+  });
+
 });

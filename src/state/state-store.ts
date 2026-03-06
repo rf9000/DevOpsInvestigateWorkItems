@@ -6,12 +6,6 @@ function todayISO(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function todayDateStringUTCPlus1(): string {
-  const now = new Date();
-  const utcPlus1 = new Date(now.getTime() + 60 * 60 * 1000);
-  return utcPlus1.toISOString().slice(0, 10);
-}
-
 export class StateStore {
   private filePath: string;
   private state: ProcessedState;
@@ -46,14 +40,12 @@ export class StateStore {
       lastRunAt: '',
       dailyInvestigationCount: 0,
       dailyCountDate: '',
-      createdAfter: todayDateStringUTCPlus1(),
     };
   }
 
   save(): void {
     mkdirSync(dirname(this.filePath), { recursive: true });
     this.state.lastRunAt = new Date().toISOString();
-    this.state.createdAfter = todayDateStringUTCPlus1();
     writeFileSync(this.filePath, JSON.stringify(this.state, null, 2), 'utf-8');
   }
 
@@ -86,6 +78,13 @@ export class StateStore {
     this.state.dailyInvestigationCount++;
   }
 
+  pruneProcessed(currentIds: number[]): void {
+    const currentSet = new Set(currentIds);
+    const kept = this.state.processedBugIds.filter((id) => currentSet.has(id));
+    this.state.processedBugIds = kept;
+    this.processedSet = new Set(kept);
+  }
+
   get dailyInvestigationCount(): number {
     return this.state.dailyInvestigationCount;
   }
@@ -96,7 +95,6 @@ export class StateStore {
       lastRunAt: '',
       dailyInvestigationCount: 0,
       dailyCountDate: '',
-      createdAfter: todayDateStringUTCPlus1(),
     };
     this.processedSet = new Set();
     this.save();
@@ -104,10 +102,6 @@ export class StateStore {
 
   get isFirstRun(): boolean {
     return this.state.lastRunAt === '';
-  }
-
-  get createdAfter(): string {
-    return this.state.createdAfter;
   }
 
   get processedCount(): number {

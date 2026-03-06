@@ -114,14 +114,9 @@ interface WiqlResponse {
 export async function queryBugsUnderFeatures(
   config: AppConfig,
   featureIds: number[],
-  createdAfter?: string,
 ): Promise<number[]> {
   const idList = featureIds.join(',');
   let wiql = `SELECT [System.Id] FROM WorkItemLinks WHERE [Source].[System.Id] IN (${idList}) AND [Target].[System.WorkItemType] IN ('Bug', 'User Story') AND [Target].[System.State] NOT IN ('Resolved', 'Closed')`;
-
-  if (createdAfter) {
-    wiql += ` AND [Target].[System.CreatedDate] >= '${createdAfter}'`;
-  }
 
   if (config.assignedToFilter.length > 0) {
     const names = config.assignedToFilter.map((n) => `'${n}'`).join(', ');

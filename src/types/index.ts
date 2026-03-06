@@ -30,7 +30,6 @@ export interface ProcessedState {
   lastRunAt: string;
   dailyInvestigationCount: number;
   dailyCountDate: string;
-  createdAfter: string;
 }
 
 /** A bug work item fetched from Azure DevOps. */

@@ -6,6 +6,7 @@ import type {
 } from '../types/index.ts';
 import type { InvestigationContext } from './investigator.ts';
 
+import { marked } from 'marked';
 import * as sdk from '../sdk/azure-devops-client.ts';
 import * as inv from './investigator.ts';
 import * as sl from './skill-loader.ts';
@@ -73,12 +74,18 @@ export async function processBug(
     log(`  Bug #${bugId}: Starting investigation...`);
     const output = await deps.investigateBug(config, context);
 
+    if (!output || !output.trim()) {
+      log(`  Bug #${bugId}: Investigation returned empty result — skipping comment`);
+      return { bugId, investigated: false, error: 'Investigation returned empty result' };
+    }
+
     if (config.dryRun) {
       log(`  Bug #${bugId}: [DRY RUN] Investigation result:\n${output}`);
       return { bugId, investigated: true };
     }
 
-    await deps.addWorkItemComment(config, bugId, output);
+    const commentHtml = await marked(output);
+    await deps.addWorkItemComment(config, bugId, commentHtml);
     log(`  Bug #${bugId}: Investigation posted as comment`);
 
     return { bugId, investigated: true };

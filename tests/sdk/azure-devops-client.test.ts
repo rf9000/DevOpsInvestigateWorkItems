@@ -257,6 +257,7 @@ describe('queryBugsUnderFeatures', () => {
     expect(body.query).toContain('12345,67890');
     expect(body.query).toContain("'Bug', 'User Story'");
     expect(body.query).toContain('NOT IN');
+    expect(body.query).not.toContain('CreatedDate');
   });
 
   test('deduplicates bug IDs', async () => {

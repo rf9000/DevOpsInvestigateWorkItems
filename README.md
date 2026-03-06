@@ -1,63 +1,49 @@
-# DevOpsPullTemplate
+# DevOps Investigate Work Items
 
-A GitHub template repository for building Azure DevOps automation projects with Bun, TypeScript, Zod, and Claude AI.
+Automatically investigates new bugs under Azure DevOps feature work items using Claude AI and posts findings as work item comments.
 
-## What is this?
+## How it works
 
-This template provides production-ready scaffolding for projects that:
-- Pull data from Azure DevOps (PRs, work items, commits)
-- Process items with AI using Claude
-- Track state to avoid reprocessing
-- Run as a watcher (continuous polling) or on-demand (single run)
+1. Polls Azure DevOps for bug work items linked under configured feature IDs
+2. Tracks which bugs have already been processed (JSON state file)
+3. For each new bug, sends the title, description, and repro steps to a Claude agent
+4. The Claude agent investigates the bug against a local codebase using Read, Grep, Glob, and Bash tools
+5. Posts the investigation result as a comment on the Azure DevOps work item
 
-## Getting started
+On first run, existing bugs are seeded as already-processed so only new bugs are investigated.
 
-1. Click **"Use this template"** on GitHub to create a new repository
-2. Clone your new repo and install dependencies:
+## Setup
+
+1. Install dependencies:
    ```bash
-   git clone <your-repo-url>
-   cd <your-repo>
    bun install
    ```
-3. Copy `.env.example` to `.env` and fill in your Azure DevOps credentials:
+2. Copy `.env.example` to `.env` and fill in your values:
    ```bash
    cp .env.example .env
    ```
-4. Run tests to verify everything works:
-   ```bash
-   bun test
-   ```
-5. Try the CLI:
-   ```bash
-   bun src/cli/index.ts help
-   bun src/cli/index.ts run-once --dry-run
-   ```
 
-## Customizing for your project
+### Required environment variables
 
-1. **Update `package.json`** — change the `name` field
-2. **Update `.env.example`** — add any project-specific env vars
-3. **Replace the processor** — edit `src/services/processor.ts` with your business logic
-4. **Replace the AI prompt** — edit `.claude/commands/do-process-item.md`
-5. **Update types** — add project-specific interfaces to `src/types/index.ts`
-6. **Update this README** — describe what your project does
+| Variable | Description |
+|----------|-------------|
+| `AZURE_DEVOPS_PAT` | Azure DevOps personal access token |
+| `AZURE_DEVOPS_ORG` | Azure DevOps organization name |
+| `AZURE_DEVOPS_PROJECT` | Azure DevOps project name |
+| `FEATURE_WORK_ITEM_IDS` | Comma-separated feature work item IDs to watch |
+| `TARGET_REPO_PATH` | Local path to the repository for Claude to investigate |
 
-## Project structure
+### Optional environment variables
 
-```
-src/
-├── cli/index.ts              # CLI entry point (watch, run-once, test-pr, reset-state)
-├── config/index.ts           # Zod-based environment variable validation
-├── sdk/azure-devops-client.ts # Azure DevOps REST API client with retry
-├── services/
-│   ├── watcher.ts            # Polling loop with graceful shutdown
-│   ├── processor.ts          # Business logic (replace with your own)
-│   └── ai-generator.ts       # Claude AI integration
-├── state/state-store.ts      # JSON-based state persistence
-└── types/index.ts            # Shared TypeScript interfaces
-
-tests/                        # Mirror of src/ with full test coverage
-```
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `POLL_INTERVAL_MINUTES` | 15 | Polling interval in minutes |
+| `MAX_INVESTIGATIONS_PER_DAY` | 5 | Daily investigation limit |
+| `CLAUDE_MODEL` | claude-sonnet-4-6 | Claude model to use |
+| `PROMPT_PATH` | .claude/commands/do-process-item.md | Path to the investigation prompt |
+| `SKILLS_DIR` | .claude/commands | Directory containing skill `.md` files loaded into the agent |
+| `ASSIGNED_TO_FILTER` | *(all)* | Comma-separated names to filter bugs by assignee |
+| `STATE_DIR` | .state | State file directory |
 
 ## Commands
 
@@ -65,13 +51,27 @@ tests/                        # Mirror of src/ with full test coverage
 |---------|-------------|
 | `bun run start` | Start the watcher (polls every N minutes) |
 | `bun run once` | Run a single poll cycle and exit |
-| `bun src/cli/index.ts test-pr <id>` | Process a single PR in dry-run mode |
-| `bun src/cli/index.ts reset-state` | Clear processed state |
+| `bun run run-bug -- <id>` | Investigate a single bug and post results to Azure DevOps |
+| `bun src/cli/index.ts test-bug <id>` | Investigate a single bug in dry-run mode |
+| `bun src/cli/index.ts reset-state` | Clear processed bug state |
 | `bun test` | Run all tests |
-| `bun run typecheck` | Run TypeScript type checking |
+| `bun run typecheck` | TypeScript type checking |
 
-Add `--dry-run` to any command to skip Azure DevOps writes.
+Add `--dry-run` to `watch`, `run-once`, or `run-bug` to skip writing comments to Azure DevOps.
 
-## Patterns
+## Project structure
 
-See [PATTERNS.md](PATTERNS.md) for a quick reference of all architectural patterns used in this template.
+```
+src/
+  cli/index.ts                  CLI entry point (watch, run-once, run-bug, test-bug, reset-state)
+  config/index.ts               Zod-based environment variable validation
+  sdk/azure-devops-client.ts    Azure DevOps REST API client with retry
+  services/
+    watcher.ts                  Polling loop with graceful shutdown
+    processor.ts                Fetches bug details and orchestrates investigation
+    investigator.ts             Claude Agent SDK integration
+    skill-loader.ts             Loads .md skill files for the agent
+  state/state-store.ts          JSON-based state persistence with daily limits
+  types/index.ts                Shared TypeScript interfaces
+tests/                          Mirrors src/ structure
+```

@@ -1,6 +1,45 @@
 import { readFileSync } from 'fs';
 import { query } from '@anthropic-ai/claude-agent-sdk';
+import type { PermissionResult } from '@anthropic-ai/claude-agent-sdk';
 import type { AppConfig, Skill } from '../types/index.ts';
+
+const DENIED_BASH_PATTERNS = [
+  /\bgit\s+(push|commit|merge|rebase|reset|checkout|branch\s+-[dD]|stash\s+drop|clean|tag\s+-d)/,
+  /\brm\s+(-rf?|--recursive)/,
+  /\brmdir\b/,
+  /\bdel\b/,
+  /\bmkdir\b/,
+  /\bmv\b/,
+  /\bcp\b/,
+  /\b(chmod|chown)\b/,
+  /\bnpm\s+(publish|install|uninstall)/,
+  /\bbun\s+(add|remove|install|publish)/,
+  /\bcurl\s.*(-X\s*(POST|PUT|PATCH|DELETE)|--data|--request\s*(POST|PUT|PATCH|DELETE))/,
+  /\baz\s+devops/,
+  /\bgh\s+(pr|issue)\s+(create|close|merge|delete|comment)/,
+  />\s*[^\s]/, // redirect output to file
+  /\btee\b/,
+  /\bsed\s+-i/,
+  /\bawk\b.*>/, // awk with output redirect
+];
+
+export async function canUseTool(
+  toolName: string,
+  input: Record<string, unknown>,
+): Promise<PermissionResult> {
+  if (toolName === 'Bash') {
+    const command = String(input.command ?? '');
+    for (const pattern of DENIED_BASH_PATTERNS) {
+      if (pattern.test(command)) {
+        return {
+          behavior: 'deny',
+          message: `Blocked destructive bash command: ${command}`,
+        };
+      }
+    }
+  }
+  return { behavior: 'allow' };
+}
 
 export interface InvestigationContext {
   bugTitle: string;
@@ -23,10 +62,17 @@ export async function investigateBug(
     options: {
       model: config.claudeModel,
       maxTurns: 25,
-      allowedTools: ['Read', 'Grep', 'Glob', 'Bash'],
+      tools: ['Read', 'Grep', 'Glob', 'Bash', 'Skill', 'Agent', 'LSP'],
+      disallowedTools: ['Edit', 'Write', 'NotebookEdit'],
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
-      systemPrompt,
+      canUseTool,
+      systemPrompt: {
+        type: 'preset',
+        preset: 'claude_code',
+        append: systemPrompt,
+      },
+      settingSources: ['project'],
       cwd: config.targetRepoPath,
     },
   })) {
