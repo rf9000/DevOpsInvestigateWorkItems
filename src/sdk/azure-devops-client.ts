@@ -116,7 +116,7 @@ export async function queryBugsUnderFeatures(
   featureIds: number[],
 ): Promise<number[]> {
   const idList = featureIds.join(',');
-  let wiql = `SELECT [System.Id] FROM WorkItemLinks WHERE [Source].[System.Id] IN (${idList}) AND [Target].[System.WorkItemType] IN ('Bug', 'User Story') AND [Target].[System.State] NOT IN ('Resolved', 'Closed')`;
+  let wiql = `SELECT [System.Id] FROM WorkItemLinks WHERE [Source].[System.Id] IN (${idList}) AND [Target].[System.WorkItemType] IN ('Bug', 'User Story') AND [Target].[System.State] NOT IN ('Resolved', 'Closed', 'Removed')`;
 
   if (config.assignedToFilter.length > 0) {
     const names = config.assignedToFilter.map((n) => `'${n}'`).join(', ');

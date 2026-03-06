@@ -297,6 +297,18 @@ describe('queryBugsUnderFeatures', () => {
     expect(body.query).toContain("[Target].[System.AssignedTo] IN ('Alice Smith', 'Bob Jones')");
   });
 
+  test('excludes Removed state in WIQL query', async () => {
+    setMockFetch({ workItemRelations: [] });
+    const config = mockConfig();
+
+    await queryBugsUnderFeatures(config, [12345]);
+
+    const call = mockFn.mock.calls[0]!;
+    const init = call[1] as RequestInit;
+    const body = JSON.parse(init.body as string) as { query: string };
+    expect(body.query).toContain("'Removed'");
+  });
+
   test('omits AssignedTo filter when not configured', async () => {
     setMockFetch({ workItemRelations: [] });
     const config = mockConfig();
