@@ -31,3 +31,7 @@ Use this exact structure:
 - If the bug description is vague, say so — don't guess.
 - If you can't find relevant code, say so.
 - Do NOT make changes to the codebase.
+- **Use available skills.** If invocable skills are listed in the system prompt under "Available Invocable Skills", check whether any are relevant to the bug you are investigating. If the bug involves an area covered by a skill (e.g., online/C# microservice behavior, field mappings between AL and online), invoke it using the Skill tool. The skill will handle specialized investigation (e.g., cloning repos, tracing mappings across codebases) that you cannot do manually.
+
+## CRITICAL: Final Output Requirement
+Your LAST message in the conversation MUST be the complete investigation report using the Output Format above. Do NOT end with meta-commentary, status updates, or remarks about your own process (e.g., "the analysis is complete", "the background task finished", "results were redundant"). If you used subagents or background tasks, ignore their completion status and always re-output the full report as your final message. The system captures ONLY your last message — anything before it is lost.

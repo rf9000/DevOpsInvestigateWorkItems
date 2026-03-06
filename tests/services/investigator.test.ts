@@ -1,6 +1,7 @@
 import { describe, test, expect } from 'bun:test';
-import { buildUserPrompt, buildUserMessage, buildSystemPrompt, canUseTool } from '../../src/services/investigator.ts';
+import { buildUserPrompt, buildUserMessage, buildSystemPrompt, canUseTool, looksLikeReport } from '../../src/services/investigator.ts';
 import type { InvestigationContext } from '../../src/services/investigator.ts';
+import type { DiscoveredSkill } from '../../src/services/skill-loader.ts';
 import { writeFileSync, mkdtempSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -11,6 +12,7 @@ describe('buildUserPrompt', () => {
     bugDescription: 'When a user has an expired JWT token, the login page crashes instead of redirecting to the auth page.',
     bugReproSteps: '1. Login with valid credentials\n2. Wait for token to expire\n3. Try to access dashboard',
     skills: [],
+    discoveredSkills: [],
     images: [],
   };
 
@@ -76,6 +78,7 @@ describe('buildUserMessage', () => {
     bugDescription: 'Crash on login',
     bugReproSteps: '1. Login',
     skills: [],
+    discoveredSkills: [],
     images: [],
   };
 
@@ -148,6 +151,49 @@ describe('buildSystemPrompt', () => {
     expect(result).toContain('Use TypeScript strict mode.');
     expect(result).toContain('### Skill: testing');
     expect(result).toContain('Always write unit tests.');
+  });
+
+  test('appends discovered skills section when present', () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'prompt-test-'));
+    const promptPath = join(tmpDir, 'prompt.md');
+    writeFileSync(promptPath, 'Base prompt.', 'utf-8');
+
+    const discovered: DiscoveredSkill[] = [
+      { name: 'online-investigate', description: 'Investigates mappings between AL and C# microservices.', skillDir: '/fake/path' },
+    ];
+
+    const result = buildSystemPrompt(promptPath, [], discovered);
+    expect(result).toContain('Base prompt.');
+    expect(result).toContain('## Available Invocable Skills');
+    expect(result).toContain('**online-investigate**');
+    expect(result).toContain('Investigates mappings between AL and C# microservices.');
+    expect(result).toContain('Skill tool');
+  });
+
+  test('omits discovered skills section when empty', () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'prompt-test-'));
+    const promptPath = join(tmpDir, 'prompt.md');
+    writeFileSync(promptPath, 'Base prompt.', 'utf-8');
+
+    const result = buildSystemPrompt(promptPath, [], []);
+    expect(result).not.toContain('Available Invocable Skills');
+  });
+
+  test('includes both loaded skills and discovered skills', () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'prompt-test-'));
+    const promptPath = join(tmpDir, 'prompt.md');
+    writeFileSync(promptPath, 'Base.', 'utf-8');
+
+    const skills = [{ name: 'my-skill', content: 'Skill content.' }];
+    const discovered: DiscoveredSkill[] = [
+      { name: 'online-investigate', description: 'Online desc.', skillDir: '/fake' },
+    ];
+
+    const result = buildSystemPrompt(promptPath, skills, discovered);
+    expect(result).toContain('## Loaded Skills');
+    expect(result).toContain('### Skill: my-skill');
+    expect(result).toContain('## Available Invocable Skills');
+    expect(result).toContain('**online-investigate**');
   });
 });
 
@@ -251,5 +297,31 @@ describe('canUseTool', () => {
   test('allows non-Bash tools without checking', async () => {
     const result = await canUseTool('Read', { file_path: '/etc/passwd' });
     expect(result.behavior).toBe('allow');
+  });
+});
+
+describe('looksLikeReport', () => {
+  test('returns true for a well-formed report', () => {
+    const report = `### Bug Validity\nYes\n\n### Root Cause\nMissing null check.\n\n### Suggested Fix\nAdd guard clause.`;
+    expect(looksLikeReport(report)).toBe(true);
+  });
+
+  test('returns true with 2 of 3 headers', () => {
+    const partial = `### Bug Validity\nYes\n\n### Root Cause\nSomething broke.`;
+    expect(looksLikeReport(partial)).toBe(true);
+  });
+
+  test('returns false for meta-commentary', () => {
+    const meta = 'the background task completed but the analysis is already finished — those results were redundant.';
+    expect(looksLikeReport(meta)).toBe(false);
+  });
+
+  test('returns false for empty string', () => {
+    expect(looksLikeReport('')).toBe(false);
+  });
+
+  test('returns false with only 1 header', () => {
+    const oneHeader = `### Bug Validity\nYes, this is a bug.`;
+    expect(looksLikeReport(oneHeader)).toBe(false);
   });
 });

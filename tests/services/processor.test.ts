@@ -40,6 +40,7 @@ function makeDeps(overrides: Partial<ProcessorDeps> = {}): ProcessorDeps {
     investigateBug: mock(() => Promise.resolve('### Bug Validity\nYes\n\n### Root Cause\nToken validation missing.')),
     addWorkItemComment: mock(() => Promise.resolve({ id: 1, text: 'comment' })),
     loadSkills: mock(() => Promise.resolve([])),
+    discoverTargetRepoSkills: mock(() => []),
     downloadAttachment: mock(() =>
       Promise.resolve({
         data: Buffer.from('fake-png-data'),
@@ -237,6 +238,24 @@ describe('processBug', () => {
     expect(result.investigated).toBe(true);
     const context = investigateMock.mock.calls[0]![1] as InvestigationContext;
     expect(context.images).toHaveLength(0);
+  });
+
+  test('discovers and passes target repo skills to investigation context', async () => {
+    const config = mockConfig();
+    const discovered = [
+      { name: 'online-investigate', description: 'Investigates online.', skillDir: 'C:/fake/path' },
+    ];
+    const investigateMock = mock((_cfg: AppConfig, _ctx: unknown) => Promise.resolve('result'));
+    const deps = makeDeps({
+      discoverTargetRepoSkills: mock(() => discovered),
+      investigateBug: investigateMock,
+    });
+
+    await processBug(config, 100, deps);
+
+    expect(investigateMock).toHaveBeenCalledTimes(1);
+    const context = investigateMock.mock.calls[0]![1] as InvestigationContext;
+    expect(context.discoveredSkills).toEqual(discovered);
   });
 
   test('passes empty images array when no images in HTML', async () => {

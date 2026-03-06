@@ -7,6 +7,7 @@ import type {
 } from '../types/index.ts';
 import type { InvestigationContext } from './investigator.ts';
 import type { AttachmentDownload } from '../sdk/azure-devops-client.ts';
+import type { DiscoveredSkill } from './skill-loader.ts';
 
 import { marked } from 'marked';
 import * as sdk from '../sdk/azure-devops-client.ts';
@@ -33,6 +34,8 @@ export interface ProcessorDeps {
 
   loadSkills: (skillsDir: string) => Promise<Skill[]>;
 
+  discoverTargetRepoSkills: (targetRepoPath: string) => DiscoveredSkill[];
+
   downloadAttachment: (
     config: AppConfig,
     attachmentUrl: string,
@@ -44,6 +47,7 @@ const defaultDeps: ProcessorDeps = {
   investigateBug: inv.investigateBug,
   addWorkItemComment: sdk.addWorkItemComment,
   loadSkills: sl.loadSkills,
+  discoverTargetRepoSkills: sl.discoverTargetRepoSkills,
   downloadAttachment: sdk.downloadAttachment,
 };
 
@@ -102,12 +106,18 @@ export async function processBug(
     const bugReproSteps = stripHtmlToText(rawReproSteps);
 
     const skills = await deps.loadSkills(config.skillsDir);
+    const discoveredSkills = deps.discoverTargetRepoSkills(config.targetRepoPath);
+
+    if (discoveredSkills.length > 0) {
+      log(`  Bug #${bugId}: Discovered ${discoveredSkills.length} invocable skill(s) in target repo`);
+    }
 
     const context: InvestigationContext = {
       bugTitle,
       bugDescription,
       bugReproSteps,
       skills,
+      discoveredSkills,
       images,
     };
 

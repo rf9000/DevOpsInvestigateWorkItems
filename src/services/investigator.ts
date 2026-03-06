@@ -3,6 +3,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { PermissionResult, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages/messages';
 import type { AppConfig, ImageAttachment, Skill } from '../types/index.ts';
+import type { DiscoveredSkill } from './skill-loader.ts';
 
 const DENIED_BASH_PATTERNS = [
   /\bgit\s+(push|commit|merge|rebase|reset|checkout|branch\s+-[dD]|stash\s+drop|clean|tag\s+-d)/,
@@ -47,6 +48,7 @@ export interface InvestigationContext {
   bugDescription: string;
   bugReproSteps: string;
   skills: Skill[];
+  discoveredSkills: DiscoveredSkill[];
   images: ImageAttachment[];
 }
 
@@ -74,11 +76,24 @@ export function buildUserMessage(context: InvestigationContext): SDKUserMessage 
   };
 }
 
+const REPORT_HEADERS = ['### Bug Validity', '### Root Cause', '### Suggested Fix'];
+
+export function looksLikeReport(text: string): boolean {
+  return REPORT_HEADERS.filter((h) => text.includes(h)).length >= 2;
+}
+
+function extractAssistantText(message: { message: { content: unknown[] } }): string {
+  return message.message.content
+    .filter((b): b is { type: 'text'; text: string } => (b as { type: string }).type === 'text')
+    .map((b) => b.text)
+    .join('\n');
+}
+
 export async function investigateBug(
   config: AppConfig,
   context: InvestigationContext,
 ): Promise<string> {
-  const systemPrompt = buildSystemPrompt(config.promptPath, context.skills);
+  const systemPrompt = buildSystemPrompt(config.promptPath, context.skills, context.discoveredSkills);
 
   const hasImages = context.images.length > 0;
 
@@ -94,6 +109,7 @@ export async function investigateBug(
   }
 
   let result: string | undefined;
+  const assistantTexts: string[] = [];
 
   for await (const message of query({
     prompt,
@@ -114,6 +130,12 @@ export async function investigateBug(
       cwd: config.targetRepoPath,
     },
   })) {
+    if (message.type === 'assistant') {
+      const text = extractAssistantText(message);
+      if (text.trim()) {
+        assistantTexts.push(text);
+      }
+    }
     if (message.type === 'result' && message.subtype === 'success') {
       result = message.result;
     }
@@ -123,24 +145,51 @@ export async function investigateBug(
     throw new Error('No investigation result received from Claude Agent SDK');
   }
 
+  // If the final result doesn't look like a report, search earlier assistant
+  // messages for one that does (the agent may have output the report mid-conversation
+  // and then ended with meta-commentary about a background task).
+  if (!looksLikeReport(result)) {
+    for (let i = assistantTexts.length - 1; i >= 0; i--) {
+      const candidate = assistantTexts[i]!;
+      if (looksLikeReport(candidate)) {
+        return candidate.trim();
+      }
+    }
+  }
+
   return result.trim();
 }
 
 export function buildSystemPrompt(
   promptPath: string,
   skills: Skill[],
+  discoveredSkills: DiscoveredSkill[] = [],
 ): string {
   const basePrompt = readFileSync(promptPath, 'utf-8');
+  const sections: string[] = [basePrompt];
 
-  if (skills.length === 0) {
-    return basePrompt;
+  if (skills.length > 0) {
+    const skillSections = skills
+      .map((s) => `### Skill: ${s.name}\n${s.content}`)
+      .join('\n\n');
+    sections.push(`## Loaded Skills\n\n${skillSections}`);
   }
 
-  const skillSections = skills
-    .map((s) => `### Skill: ${s.name}\n${s.content}`)
-    .join('\n\n');
+  if (discoveredSkills.length > 0) {
+    const listing = discoveredSkills
+      .map((s) => `- **${s.name}**: ${s.description}`)
+      .join('\n');
+    sections.push(
+      `## Available Invocable Skills\n\n` +
+      `The target repository has the following skills available via the \`Skill\` tool. ` +
+      `When your investigation touches an area covered by one of these skills, you MUST invoke it using the Skill tool — ` +
+      `do not try to manually replicate what the skill does.\n\n` +
+      `${listing}\n\n` +
+      `To invoke a skill, use the Skill tool with the skill name. The skill will guide your investigation for that area.`,
+    );
+  }
 
-  return `${basePrompt}\n\n## Loaded Skills\n\n${skillSections}`;
+  return sections.join('\n\n');
 }
 
 export function buildUserPrompt(context: InvestigationContext): string {
