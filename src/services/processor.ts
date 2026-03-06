@@ -1,15 +1,18 @@
 import type {
   AppConfig,
   BugProcessResult,
+  ImageAttachment,
   WorkItemResponse,
   Skill,
 } from '../types/index.ts';
 import type { InvestigationContext } from './investigator.ts';
+import type { AttachmentDownload } from '../sdk/azure-devops-client.ts';
 
 import { marked } from 'marked';
 import * as sdk from '../sdk/azure-devops-client.ts';
 import * as inv from './investigator.ts';
 import * as sl from './skill-loader.ts';
+import { extractImageUrls, stripHtmlToText } from '../utils/html.ts';
 
 export interface ProcessorDeps {
   getWorkItem: (
@@ -29,6 +32,11 @@ export interface ProcessorDeps {
   ) => Promise<unknown>;
 
   loadSkills: (skillsDir: string) => Promise<Skill[]>;
+
+  downloadAttachment: (
+    config: AppConfig,
+    attachmentUrl: string,
+  ) => Promise<AttachmentDownload>;
 }
 
 const defaultDeps: ProcessorDeps = {
@@ -36,6 +44,7 @@ const defaultDeps: ProcessorDeps = {
   investigateBug: inv.investigateBug,
   addWorkItemComment: sdk.addWorkItemComment,
   loadSkills: sl.loadSkills,
+  downloadAttachment: sdk.downloadAttachment,
 };
 
 function log(message: string): void {
@@ -55,12 +64,42 @@ export async function processBug(
     const workItem = await deps.getWorkItem(config, bugId);
 
     const bugTitle = String(workItem.fields['System.Title'] ?? '');
-    const bugDescription = String(workItem.fields['System.Description'] ?? '');
-    const bugReproSteps = String(
+    const rawDescription = String(workItem.fields['System.Description'] ?? '');
+    const rawReproSteps = String(
       workItem.fields['Microsoft.VSTS.TCM.ReproSteps'] ?? '',
     );
 
     log(`  Bug #${bugId}: "${bugTitle}"`);
+
+    // Extract image URLs from HTML fields (combined max 5)
+    const extractedImages = extractImageUrls(
+      rawDescription + rawReproSteps,
+      5,
+    );
+
+    // Download images (skip failures gracefully)
+    const images: ImageAttachment[] = [];
+    for (const img of extractedImages) {
+      try {
+        const download = await deps.downloadAttachment(config, img.url);
+        images.push({
+          base64Data: download.data.toString('base64'),
+          mediaType: download.mediaType,
+          alt: img.alt,
+        });
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        log(`  Bug #${bugId}: Skipping image download — ${errMsg}`);
+      }
+    }
+
+    if (images.length > 0) {
+      log(`  Bug #${bugId}: Downloaded ${images.length} image(s)`);
+    }
+
+    // Strip HTML to plain text for cleaner prompt
+    const bugDescription = stripHtmlToText(rawDescription);
+    const bugReproSteps = stripHtmlToText(rawReproSteps);
 
     const skills = await deps.loadSkills(config.skillsDir);
 
@@ -69,6 +108,7 @@ export async function processBug(
       bugDescription,
       bugReproSteps,
       skills,
+      images,
     };
 
     log(`  Bug #${bugId}: Starting investigation...`);

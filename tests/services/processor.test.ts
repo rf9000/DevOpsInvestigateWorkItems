@@ -1,7 +1,8 @@
 import { describe, test, expect, mock } from 'bun:test';
-import type { AppConfig } from '../../src/types/index.ts';
+import type { AppConfig, ImageAttachment } from '../../src/types/index.ts';
 import { processBug } from '../../src/services/processor.ts';
 import type { ProcessorDeps } from '../../src/services/processor.ts';
+import type { InvestigationContext } from '../../src/services/investigator.ts';
 
 function mockConfig(): AppConfig {
   return {
@@ -39,6 +40,12 @@ function makeDeps(overrides: Partial<ProcessorDeps> = {}): ProcessorDeps {
     investigateBug: mock(() => Promise.resolve('### Bug Validity\nYes\n\n### Root Cause\nToken validation missing.')),
     addWorkItemComment: mock(() => Promise.resolve({ id: 1, text: 'comment' })),
     loadSkills: mock(() => Promise.resolve([])),
+    downloadAttachment: mock(() =>
+      Promise.resolve({
+        data: Buffer.from('fake-png-data'),
+        mediaType: 'image/png' as const,
+      }),
+    ),
     ...overrides,
   };
 }
@@ -134,5 +141,114 @@ describe('processBug', () => {
     expect(investigateMock).toHaveBeenCalledTimes(1);
     const context = investigateMock.mock.calls[0]![1] as { skills: typeof skills };
     expect(context.skills).toEqual(skills);
+  });
+
+  test('extracts images from HTML and passes them in context', async () => {
+    const config = mockConfig();
+    const investigateMock = mock((_cfg: AppConfig, _ctx: unknown) => Promise.resolve('result'));
+    const downloadMock = mock(() =>
+      Promise.resolve({
+        data: Buffer.from([0x89, 0x50, 0x4e, 0x47]),
+        mediaType: 'image/png' as const,
+      }),
+    );
+    const deps = makeDeps({
+      getWorkItem: mock(() =>
+        Promise.resolve({
+          id: 100,
+          fields: {
+            'System.Title': 'Bug with screenshot',
+            'System.Description':
+              '<p>Error:</p><img src="https://dev.azure.com/org/_apis/wit/attachments/abc?fileName=err.png" alt="error">',
+            'Microsoft.VSTS.TCM.ReproSteps': '<p>Steps</p>',
+          },
+          rev: 1,
+          url: 'https://example.com/100',
+        }),
+      ),
+      investigateBug: investigateMock,
+      downloadAttachment: downloadMock,
+    });
+
+    await processBug(config, 100, deps);
+
+    expect(downloadMock).toHaveBeenCalledTimes(1);
+    const context = investigateMock.mock.calls[0]![1] as InvestigationContext;
+    expect(context.images).toHaveLength(1);
+    expect(context.images[0]!.mediaType).toBe('image/png');
+    expect(context.images[0]!.alt).toBe('error');
+    expect(context.images[0]!.base64Data).toBe(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString('base64'),
+    );
+  });
+
+  test('strips HTML from description and repro steps', async () => {
+    const config = mockConfig();
+    const investigateMock = mock((_cfg: AppConfig, _ctx: unknown) => Promise.resolve('result'));
+    const deps = makeDeps({
+      getWorkItem: mock(() =>
+        Promise.resolve({
+          id: 100,
+          fields: {
+            'System.Title': 'HTML bug',
+            'System.Description': '<p>The <strong>login</strong> page crashes.</p>',
+            'Microsoft.VSTS.TCM.ReproSteps': '<ol><li>Login</li><li>Wait</li></ol>',
+          },
+          rev: 1,
+          url: 'https://example.com/100',
+        }),
+      ),
+      investigateBug: investigateMock,
+    });
+
+    await processBug(config, 100, deps);
+
+    const context = investigateMock.mock.calls[0]![1] as InvestigationContext;
+    expect(context.bugDescription).not.toContain('<p>');
+    expect(context.bugDescription).not.toContain('<strong>');
+    expect(context.bugDescription).toContain('login');
+    expect(context.bugReproSteps).not.toContain('<ol>');
+    expect(context.bugReproSteps).not.toContain('<li>');
+  });
+
+  test('continues investigation when image download fails', async () => {
+    const config = mockConfig();
+    const investigateMock = mock((_cfg: AppConfig, _ctx: unknown) => Promise.resolve('result'));
+    const deps = makeDeps({
+      getWorkItem: mock(() =>
+        Promise.resolve({
+          id: 100,
+          fields: {
+            'System.Title': 'Bug with broken image',
+            'System.Description':
+              '<img src="https://dev.azure.com/org/_apis/wit/attachments/bad?fileName=x.png">',
+            'Microsoft.VSTS.TCM.ReproSteps': '',
+          },
+          rev: 1,
+          url: 'https://example.com/100',
+        }),
+      ),
+      investigateBug: investigateMock,
+      downloadAttachment: mock(() => Promise.reject(new Error('404 Not Found'))),
+    });
+
+    const result = await processBug(config, 100, deps);
+
+    expect(result.investigated).toBe(true);
+    const context = investigateMock.mock.calls[0]![1] as InvestigationContext;
+    expect(context.images).toHaveLength(0);
+  });
+
+  test('passes empty images array when no images in HTML', async () => {
+    const config = mockConfig();
+    const investigateMock = mock((_cfg: AppConfig, _ctx: unknown) => Promise.resolve('result'));
+    const deps = makeDeps({
+      investigateBug: investigateMock,
+    });
+
+    await processBug(config, 100, deps);
+
+    const context = investigateMock.mock.calls[0]![1] as InvestigationContext;
+    expect(context.images).toEqual([]);
   });
 });

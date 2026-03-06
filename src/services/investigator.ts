@@ -1,7 +1,8 @@
 import { readFileSync } from 'fs';
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import type { PermissionResult } from '@anthropic-ai/claude-agent-sdk';
-import type { AppConfig, Skill } from '../types/index.ts';
+import type { PermissionResult, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages/messages';
+import type { AppConfig, ImageAttachment, Skill } from '../types/index.ts';
 
 const DENIED_BASH_PATTERNS = [
   /\bgit\s+(push|commit|merge|rebase|reset|checkout|branch\s+-[dD]|stash\s+drop|clean|tag\s+-d)/,
@@ -46,6 +47,31 @@ export interface InvestigationContext {
   bugDescription: string;
   bugReproSteps: string;
   skills: Skill[];
+  images: ImageAttachment[];
+}
+
+export function buildUserMessage(context: InvestigationContext): SDKUserMessage {
+  const blocks: ContentBlockParam[] = [
+    { type: 'text', text: buildUserPrompt(context) },
+  ];
+
+  for (const img of context.images) {
+    blocks.push({
+      type: 'image',
+      source: {
+        type: 'base64',
+        media_type: img.mediaType,
+        data: img.base64Data,
+      },
+    });
+  }
+
+  return {
+    type: 'user',
+    message: { role: 'user', content: blocks },
+    parent_tool_use_id: null,
+    session_id: '',
+  };
 }
 
 export async function investigateBug(
@@ -53,12 +79,24 @@ export async function investigateBug(
   context: InvestigationContext,
 ): Promise<string> {
   const systemPrompt = buildSystemPrompt(config.promptPath, context.skills);
-  const userPrompt = buildUserPrompt(context);
+
+  const hasImages = context.images.length > 0;
+
+  let prompt: string | AsyncIterable<SDKUserMessage>;
+  if (hasImages) {
+    const userMsg = buildUserMessage(context);
+    async function* singleMessage() {
+      yield userMsg;
+    }
+    prompt = singleMessage();
+  } else {
+    prompt = buildUserPrompt(context);
+  }
 
   let result: string | undefined;
 
   for await (const message of query({
-    prompt: userPrompt,
+    prompt,
     options: {
       model: config.claudeModel,
       maxTurns: 25,
@@ -117,6 +155,14 @@ export function buildUserPrompt(context: InvestigationContext): string {
 
   if (context.bugReproSteps) {
     lines.push('', '**Reproduction Steps:**', context.bugReproSteps);
+  }
+
+  if (context.images.length > 0) {
+    lines.push(
+      '',
+      '**Attached Screenshots:**',
+      `${context.images.length} screenshot(s) are attached below. Interpret these images in the context of the bug description and reproduction steps — look for error messages, unexpected UI state, incorrect data, or visual clues that help identify the root cause. Do not simply transcribe the text in the images.`,
+    );
   }
 
   return lines.join('\n');

@@ -143,6 +143,87 @@ export async function queryBugsUnderFeatures(
   return [...new Set(bugIds)];
 }
 
+export interface AttachmentDownload {
+  data: Buffer;
+  mediaType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
+}
+
+const SUPPORTED_MEDIA_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+]);
+
+const MAX_ATTACHMENT_SIZE = 5 * 1024 * 1024; // 5MB
+
+export async function downloadAttachment(
+  config: AppConfig,
+  attachmentUrl: string,
+  retryDelays: number[] = DEFAULT_RETRY_DELAYS,
+): Promise<AttachmentDownload> {
+  const authHeader =
+    'Basic ' + Buffer.from(':' + config.pat).toString('base64');
+  const maxAttempts = retryDelays.length + 1;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const res = await fetch(attachmentUrl, {
+      headers: { Authorization: authHeader },
+    });
+
+    if (!res.ok) {
+      const isLastAttempt = attempt === maxAttempts;
+      if (res.status < 500 || isLastAttempt) {
+        throw new AzureDevOpsError(
+          `Attachment download error ${res.status}: ${attachmentUrl}`,
+          res.status,
+        );
+      }
+      const delay = retryDelays[attempt - 1] ?? 0;
+      await new Promise((r) => setTimeout(r, delay));
+      continue;
+    }
+
+    // Determine media type from Content-Type header, fallback to URL extension
+    let mediaType = (res.headers.get('Content-Type') ?? '')
+      .split(';')[0]!
+      .trim()
+      .toLowerCase();
+
+    if (!SUPPORTED_MEDIA_TYPES.has(mediaType)) {
+      // Fallback: infer from file extension in URL
+      const extMatch = attachmentUrl.match(/fileName=.*\.(png|jpe?g|gif|webp)/i);
+      if (extMatch) {
+        const ext = extMatch[1]!.toLowerCase();
+        mediaType =
+          ext === 'jpg' ? 'image/jpeg' : (`image/${ext}` as string);
+      }
+    }
+
+    if (!SUPPORTED_MEDIA_TYPES.has(mediaType)) {
+      throw new AzureDevOpsError(
+        `Unsupported media type "${mediaType}" for attachment: ${attachmentUrl}`,
+        0,
+      );
+    }
+
+    const arrayBuffer = await res.arrayBuffer();
+    if (arrayBuffer.byteLength > MAX_ATTACHMENT_SIZE) {
+      throw new AzureDevOpsError(
+        `Attachment exceeds 5MB limit (${arrayBuffer.byteLength} bytes): ${attachmentUrl}`,
+        0,
+      );
+    }
+
+    return {
+      data: Buffer.from(arrayBuffer),
+      mediaType: mediaType as AttachmentDownload['mediaType'],
+    };
+  }
+
+  throw new Error('downloadAttachment: unexpected code path');
+}
+
 interface CommentResponse {
   id: number;
   text: string;

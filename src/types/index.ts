@@ -60,6 +60,13 @@ export interface BugProcessResult {
   error?: string;
 }
 
+/** An image attachment downloaded from Azure DevOps. */
+export interface ImageAttachment {
+  base64Data: string;
+  mediaType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
+  alt: string;
+}
+
 /** A skill loaded from the skills directory. */
 export interface Skill {
   name: string;

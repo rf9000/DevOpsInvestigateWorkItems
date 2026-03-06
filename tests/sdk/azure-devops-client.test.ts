@@ -8,6 +8,7 @@ import {
   updateWorkItemField,
   queryBugsUnderFeatures,
   addWorkItemComment,
+  downloadAttachment,
 } from '../../src/sdk/azure-devops-client.ts';
 
 const originalFetch = globalThis.fetch;
@@ -329,6 +330,118 @@ describe('addWorkItemComment', () => {
 
     const body = JSON.parse(init.body as string) as { text: string };
     expect(body.text).toBe('<p>Investigation result</p>');
+  });
+});
+
+describe('downloadAttachment', () => {
+  function setMockBinaryFetch(
+    body: ArrayBuffer,
+    contentType: string,
+    status = 200,
+  ) {
+    mockFn = mock(() =>
+      Promise.resolve(
+        new Response(body, {
+          status,
+          statusText: status >= 400 ? 'Error' : 'OK',
+          headers: { 'Content-Type': contentType },
+        }),
+      ),
+    );
+    globalThis.fetch = mockFn as unknown as typeof fetch;
+  }
+
+  const attachmentUrl =
+    'https://dev.azure.com/org/_apis/wit/attachments/abc-123?fileName=screenshot.png';
+
+  test('downloads attachment with correct auth header', async () => {
+    const pngData = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+    setMockBinaryFetch(pngData.buffer as ArrayBuffer, 'image/png');
+    const config = mockConfig();
+
+    const result = await downloadAttachment(config, attachmentUrl, [0]);
+
+    expect(result.mediaType).toBe('image/png');
+    expect(result.data).toBeInstanceOf(Buffer);
+    expect(result.data.length).toBe(4);
+
+    const call = mockFn.mock.calls[0]!;
+    const url = call[0] as string;
+    expect(url).toBe(attachmentUrl);
+
+    const init = call[1] as RequestInit;
+    const headers = init.headers as Record<string, string>;
+    const expectedAuth =
+      'Basic ' + Buffer.from(':test-pat-token').toString('base64');
+    expect(headers['Authorization']).toBe(expectedAuth);
+  });
+
+  test('infers media type from file extension when Content-Type is generic', async () => {
+    const data = new Uint8Array([0xff, 0xd8]);
+    setMockBinaryFetch(
+      data.buffer as ArrayBuffer,
+      'application/octet-stream',
+    );
+    const config = mockConfig();
+
+    const jpgUrl =
+      'https://dev.azure.com/org/_apis/wit/attachments/abc?fileName=photo.jpg';
+    const result = await downloadAttachment(config, jpgUrl, [0]);
+    expect(result.mediaType).toBe('image/jpeg');
+  });
+
+  test('throws on unsupported media type', async () => {
+    const data = new Uint8Array([0x25, 0x50]);
+    setMockBinaryFetch(data.buffer as ArrayBuffer, 'application/pdf');
+    const config = mockConfig();
+
+    const pdfUrl =
+      'https://dev.azure.com/org/_apis/wit/attachments/abc?fileName=doc.pdf';
+    try {
+      await downloadAttachment(config, pdfUrl, [0]);
+      throw new Error('should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(AzureDevOpsError);
+      expect((err as AzureDevOpsError).message).toContain('Unsupported media type');
+    }
+  });
+
+  test('throws on 404', async () => {
+    setMockBinaryFetch(new ArrayBuffer(0), 'image/png', 404);
+    const config = mockConfig();
+
+    try {
+      await downloadAttachment(config, attachmentUrl, [0]);
+      throw new Error('should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(AzureDevOpsError);
+      expect((err as AzureDevOpsError).statusCode).toBe(404);
+    }
+  });
+
+  test('retries on 500 and succeeds', async () => {
+    let callIndex = 0;
+    mockFn = mock(() => {
+      callIndex++;
+      if (callIndex === 1) {
+        return Promise.resolve(
+          new Response('', { status: 500, statusText: 'Error' }),
+        );
+      }
+      const data = new Uint8Array([0x89, 0x50]);
+      return Promise.resolve(
+        new Response(data.buffer as ArrayBuffer, {
+          status: 200,
+          headers: { 'Content-Type': 'image/png' },
+        }),
+      );
+    });
+    globalThis.fetch = mockFn as unknown as typeof fetch;
+    const config = mockConfig();
+
+    const result = await downloadAttachment(config, attachmentUrl, [0, 0]);
+    expect(result.mediaType).toBe('image/png');
+    expect(mockFn).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { buildUserPrompt, buildSystemPrompt, canUseTool } from '../../src/services/investigator.ts';
+import { buildUserPrompt, buildUserMessage, buildSystemPrompt, canUseTool } from '../../src/services/investigator.ts';
 import type { InvestigationContext } from '../../src/services/investigator.ts';
 import { writeFileSync, mkdtempSync } from 'fs';
 import { join } from 'path';
@@ -11,6 +11,7 @@ describe('buildUserPrompt', () => {
     bugDescription: 'When a user has an expired JWT token, the login page crashes instead of redirecting to the auth page.',
     bugReproSteps: '1. Login with valid credentials\n2. Wait for token to expire\n3. Try to access dashboard',
     skills: [],
+    images: [],
   };
 
   test('includes bug title', () => {
@@ -52,6 +53,71 @@ describe('buildUserPrompt', () => {
     const reproIdx = prompt.indexOf('**Reproduction Steps:**');
     expect(titleIdx).toBeLessThan(descIdx);
     expect(descIdx).toBeLessThan(reproIdx);
+  });
+
+  test('includes image interpretation hint when images present', () => {
+    const prompt = buildUserPrompt({ ...baseContext, images: [
+      { base64Data: 'x', mediaType: 'image/png', alt: 'test' },
+    ] });
+    expect(prompt).toContain('**Attached Screenshots:**');
+    expect(prompt).toContain('context of the bug description');
+    expect(prompt).toContain('Do not simply transcribe');
+  });
+
+  test('omits image hint when no images', () => {
+    const prompt = buildUserPrompt(baseContext);
+    expect(prompt).not.toContain('**Attached Screenshots:**');
+  });
+});
+
+describe('buildUserMessage', () => {
+  const baseContext: InvestigationContext = {
+    bugTitle: 'Login fails',
+    bugDescription: 'Crash on login',
+    bugReproSteps: '1. Login',
+    skills: [],
+    images: [],
+  };
+
+  test('returns SDKUserMessage with text-only when no images', () => {
+    const msg = buildUserMessage(baseContext);
+    expect(msg.type).toBe('user');
+    expect(msg.session_id).toBe('');
+    expect(msg.parent_tool_use_id).toBeNull();
+
+    const content = msg.message.content;
+    expect(Array.isArray(content)).toBe(true);
+    const blocks = content as Array<{ type: string }>;
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]!.type).toBe('text');
+  });
+
+  test('includes image content blocks when images provided', () => {
+    const context: InvestigationContext = {
+      ...baseContext,
+      images: [
+        { base64Data: 'aWNvbg==', mediaType: 'image/png', alt: 'screenshot' },
+        { base64Data: 'anBlZw==', mediaType: 'image/jpeg', alt: 'error' },
+      ],
+    };
+    const msg = buildUserMessage(context);
+    const blocks = msg.message.content as Array<{ type: string; source?: { data: string; media_type: string } }>;
+
+    expect(blocks).toHaveLength(3); // 1 text + 2 images
+    expect(blocks[0]!.type).toBe('text');
+    expect(blocks[1]!.type).toBe('image');
+    expect(blocks[1]!.source!.data).toBe('aWNvbg==');
+    expect(blocks[1]!.source!.media_type).toBe('image/png');
+    expect(blocks[2]!.type).toBe('image');
+    expect(blocks[2]!.source!.data).toBe('anBlZw==');
+    expect(blocks[2]!.source!.media_type).toBe('image/jpeg');
+  });
+
+  test('text block contains the user prompt content', () => {
+    const msg = buildUserMessage(baseContext);
+    const blocks = msg.message.content as Array<{ type: string; text?: string }>;
+    expect(blocks[0]!.text).toContain('Login fails');
+    expect(blocks[0]!.text).toContain('Crash on login');
   });
 });
 
