@@ -6,4 +6,5 @@ coverage/
 .state/
 .cache/
 .DS_Store
-.claude
+.claude/settings*
+.claude/todos*
