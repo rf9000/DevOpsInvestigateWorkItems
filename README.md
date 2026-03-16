@@ -143,12 +143,36 @@ Then restart the container:
 docker compose restart investigate-work-items
 ```
 
+### Troubleshooting
+
+**"Claude Code process exited with code 1" with no other details**
+- Most likely an expired OAuth token. Re-authenticate on the VM host (see above).
+- Run `docker compose exec investigate-work-items claude -p "hello"` to test Claude Code directly.
+
+**"--dangerously-skip-permissions cannot be used with root/sudo privileges"**
+- The Agent SDK requires this flag, but Claude Code blocks it for root. The Dockerfile must create a non-root user and the entrypoint must drop privileges before running the app.
+
+**"EACCES: permission denied, open" from the Agent SDK**
+- Bind-mounted volumes retain host file ownership. The entrypoint must `chown -R claude:claude` on mounted directories (`/app/.state`, `/home/claude/.claude`).
+- Also check that `HOME` is set correctly when using `su` — without a login shell, `HOME` stays as `/root`.
+
+**Install script fails with syntax error or installs silently fail**
+- The Claude Code install script requires `bash`, not `sh`. Use `curl -fsSL https://claude.ai/install.sh | bash`.
+- After install, `~/.local/bin` must be added to `PATH`.
+
+**OAuth login times out on the VM**
+- Use `ANTHROPIC_AUTH_TIMEOUT=300000 claude auth login` to extend the timeout to 5 minutes.
+- Open the auth URL on your local PC's browser, authorize, and paste the code back into the VM terminal.
+- The default 15-second timeout is too short for manual copy-paste flow on headless VMs.
+
 ### Architecture Notes
 
 - The container starts as **root** to fix volume permissions, then drops to a non-root `claude` user via the entrypoint
 - Claude Code refuses `--dangerously-skip-permissions` (used by the Agent SDK) when running as root, which is why the non-root user is required
+- The entrypoint runs `chown -R` on mounted volumes before dropping privileges, since bind mounts retain host uid/gid
 - The target repo is cloned into `/repo` inside the container on startup
 - State (processed bugs) is persisted via a Docker volume at `/app/.state`
+- Claude auth is bind-mounted from the VM host (`/home/azureuser/.claude:/home/claude/.claude`)
 
 ## Project structure
 
