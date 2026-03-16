@@ -17,16 +17,18 @@ RUN useradd -m -s /bin/bash claude && \
     chown -R claude:claude /app && \
     mkdir -p /repo && chown claude:claude /repo
 
-USER claude
-
 # Install Claude Code CLI as non-root user
+USER claude
 RUN curl -fsSL https://claude.ai/install.sh | bash
+USER root
+
 ENV PATH="/home/claude/.local/bin:$PATH"
 
 # Persist state and Claude auth across restarts
 VOLUME /app/.state
 VOLUME /home/claude/.claude
 
-COPY --chown=claude:claude --chmod=755 entrypoint.sh /entrypoint.sh
+COPY --chmod=755 entrypoint.sh /entrypoint.sh
 
+# Start as root; entrypoint fixes volume permissions then drops to claude user
 ENTRYPOINT ["/entrypoint.sh"]
