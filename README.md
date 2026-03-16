@@ -59,6 +59,97 @@ On first run, existing bugs are seeded as already-processed so only new bugs are
 
 Add `--dry-run` to `watch`, `run-once`, or `run-bug` to skip writing comments to Azure DevOps.
 
+## VM Deployment (Docker)
+
+The service runs on an Azure VM using Docker Compose. The container clones the target repo, polls Azure DevOps, and runs Claude Code investigations automatically.
+
+### Prerequisites
+
+- SSH access to the VM
+- A Claude Code team subscription (for OAuth authentication)
+
+### Initial Setup
+
+1. SSH into the VM:
+   ```bash
+   ssh -i "vm-devops-automation_key.pem" azureuser@<VM_IP>
+   ```
+
+2. Navigate to the team directory:
+   ```bash
+   cd ~/teams/<team-name>
+   ```
+
+3. Install Claude Code CLI on the **VM host** (not inside Docker):
+   ```bash
+   curl -fsSL https://claude.ai/install.sh | bash
+   source ~/.bashrc
+   ```
+
+4. Authenticate Claude Code. The VM has no browser, so use an extended timeout to give yourself time to complete the OAuth flow:
+   ```bash
+   ANTHROPIC_AUTH_TIMEOUT=300000 claude auth login
+   ```
+   - Copy the URL it shows and open it in your local browser
+   - Sign in and authorize
+   - Paste the code back into the VM terminal when prompted
+
+5. Configure `.env.investigate` with your Azure DevOps settings.
+
+6. Ensure `docker-compose.yml` bind-mounts the host credentials into the container:
+   ```yaml
+   volumes:
+     - /home/azureuser/.claude:/home/claude/.claude
+   ```
+
+7. Build and start:
+   ```bash
+   docker compose build --no-cache investigate-work-items
+   docker compose up -d
+   ```
+
+### Common Commands
+
+| Command | Description |
+|---------|-------------|
+| `docker compose logs -f investigate-work-items` | Follow live logs |
+| `docker compose restart investigate-work-items` | Restart the service |
+| `docker compose exec investigate-work-items bash` | Shell into the container |
+| `docker compose exec investigate-work-items claude -p "hello"` | Test Claude Code inside container |
+| `docker compose down && docker compose up -d` | Recreate containers |
+| `docker compose build --no-cache investigate-work-items && docker compose up -d` | Full rebuild and restart |
+
+### Deploying Changes
+
+```bash
+cd ~/teams/<team-name>/DevOpsInvestigateWorkItems
+git pull
+cd ..
+docker compose build --no-cache investigate-work-items
+docker compose up -d
+```
+
+### Re-authenticating Claude Code
+
+If investigations start failing with "Claude Code process exited with code 1", the OAuth token may have expired. Re-authenticate on the VM host:
+
+```bash
+ANTHROPIC_AUTH_TIMEOUT=300000 claude auth login
+```
+
+Then restart the container:
+
+```bash
+docker compose restart investigate-work-items
+```
+
+### Architecture Notes
+
+- The container starts as **root** to fix volume permissions, then drops to a non-root `claude` user via the entrypoint
+- Claude Code refuses `--dangerously-skip-permissions` (used by the Agent SDK) when running as root, which is why the non-root user is required
+- The target repo is cloned into `/repo` inside the container on startup
+- State (processed bugs) is persisted via a Docker volume at `/app/.state`
+
 ## Project structure
 
 ```
