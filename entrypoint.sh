@@ -3,8 +3,8 @@ set -e
 
 # Fix ownership of mounted volumes (they mount as root)
 if [ "$(id -u)" = "0" ]; then
-  chown claude:claude /app/.state
-  chown claude:claude /home/claude/.claude 2>/dev/null || true
+  chown -R claude:claude /app/.state
+  chown -R claude:claude /home/claude/.claude 2>/dev/null || true
 
   # Clone or update the target repo as claude user
   if [ -n "$TARGET_REPO_URL" ]; then
