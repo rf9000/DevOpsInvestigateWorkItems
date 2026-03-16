@@ -11,7 +11,6 @@ describe('buildUserPrompt', () => {
     bugTitle: 'Login fails with expired token',
     bugDescription: 'When a user has an expired JWT token, the login page crashes instead of redirecting to the auth page.',
     bugReproSteps: '1. Login with valid credentials\n2. Wait for token to expire\n3. Try to access dashboard',
-    skills: [],
     discoveredSkills: [],
     images: [],
   };
@@ -77,7 +76,6 @@ describe('buildUserMessage', () => {
     bugTitle: 'Login fails',
     bugDescription: 'Crash on login',
     bugReproSteps: '1. Login',
-    skills: [],
     discoveredSkills: [],
     images: [],
   };
@@ -125,32 +123,13 @@ describe('buildUserMessage', () => {
 });
 
 describe('buildSystemPrompt', () => {
-  test('returns base prompt when no skills', () => {
+  test('returns base prompt when no discovered skills', () => {
     const tmpDir = mkdtempSync(join(tmpdir(), 'prompt-test-'));
     const promptPath = join(tmpDir, 'prompt.md');
     writeFileSync(promptPath, 'You are a bug investigator.', 'utf-8');
 
-    const result = buildSystemPrompt(promptPath, []);
+    const result = buildSystemPrompt(promptPath);
     expect(result).toBe('You are a bug investigator.');
-  });
-
-  test('appends skills to base prompt', () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), 'prompt-test-'));
-    const promptPath = join(tmpDir, 'prompt.md');
-    writeFileSync(promptPath, 'Base prompt.', 'utf-8');
-
-    const skills = [
-      { name: 'coding-standards', content: 'Use TypeScript strict mode.' },
-      { name: 'testing', content: 'Always write unit tests.' },
-    ];
-
-    const result = buildSystemPrompt(promptPath, skills);
-    expect(result).toContain('Base prompt.');
-    expect(result).toContain('## Loaded Skills');
-    expect(result).toContain('### Skill: coding-standards');
-    expect(result).toContain('Use TypeScript strict mode.');
-    expect(result).toContain('### Skill: testing');
-    expect(result).toContain('Always write unit tests.');
   });
 
   test('appends discovered skills section when present', () => {
@@ -162,7 +141,7 @@ describe('buildSystemPrompt', () => {
       { name: 'online-investigate', description: 'Investigates mappings between AL and C# microservices.', skillDir: '/fake/path' },
     ];
 
-    const result = buildSystemPrompt(promptPath, [], discovered);
+    const result = buildSystemPrompt(promptPath, discovered);
     expect(result).toContain('Base prompt.');
     expect(result).toContain('## Available Invocable Skills');
     expect(result).toContain('**online-investigate**');
@@ -175,25 +154,8 @@ describe('buildSystemPrompt', () => {
     const promptPath = join(tmpDir, 'prompt.md');
     writeFileSync(promptPath, 'Base prompt.', 'utf-8');
 
-    const result = buildSystemPrompt(promptPath, [], []);
+    const result = buildSystemPrompt(promptPath, []);
     expect(result).not.toContain('Available Invocable Skills');
-  });
-
-  test('includes both loaded skills and discovered skills', () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), 'prompt-test-'));
-    const promptPath = join(tmpDir, 'prompt.md');
-    writeFileSync(promptPath, 'Base.', 'utf-8');
-
-    const skills = [{ name: 'my-skill', content: 'Skill content.' }];
-    const discovered: DiscoveredSkill[] = [
-      { name: 'online-investigate', description: 'Online desc.', skillDir: '/fake' },
-    ];
-
-    const result = buildSystemPrompt(promptPath, skills, discovered);
-    expect(result).toContain('## Loaded Skills');
-    expect(result).toContain('### Skill: my-skill');
-    expect(result).toContain('## Available Invocable Skills');
-    expect(result).toContain('**online-investigate**');
   });
 });
 

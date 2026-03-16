@@ -57,8 +57,7 @@ describe("loadConfig", () => {
     expect(config.pollIntervalMinutes).toBe(15);
     expect(config.maxInvestigationsPerDay).toBe(5);
     expect(config.claudeModel).toBe("claude-sonnet-4-6");
-    expect(config.promptPath).toBe(".claude/commands/do-process-item.md");
-    expect(config.skillsDir).toBe(".claude/commands");
+    expect(config.promptPath).toBe("src/prompts/investigate-bug.md");
     expect(config.assignedToFilter).toEqual([]);
     expect(config.stateDir).toBe(".state");
   });
@@ -70,7 +69,6 @@ describe("loadConfig", () => {
       MAX_INVESTIGATIONS_PER_DAY: "10",
       CLAUDE_MODEL: "claude-opus-4-6",
       PROMPT_PATH: "custom/prompt.md",
-      SKILLS_DIR: "custom/skills",
       STATE_DIR: "/tmp/state",
     };
 
@@ -80,7 +78,6 @@ describe("loadConfig", () => {
     expect(config.maxInvestigationsPerDay).toBe(10);
     expect(config.claudeModel).toBe("claude-opus-4-6");
     expect(config.promptPath).toBe("custom/prompt.md");
-    expect(config.skillsDir).toBe("custom/skills");
     expect(config.stateDir).toBe("/tmp/state");
   });
 

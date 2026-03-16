@@ -31,8 +31,7 @@ Environment variables:
   POLL_INTERVAL_MINUTES       Polling interval (default: 15)
   MAX_INVESTIGATIONS_PER_DAY  Daily investigation limit (default: 5)
   CLAUDE_MODEL                Claude model to use (default: claude-sonnet-4-6)
-  PROMPT_PATH                 Path to prompt file (default: .claude/commands/do-process-item.md)
-  SKILLS_DIR                  Path to skill .md files (default: .claude/commands)
+  PROMPT_PATH                 Path to prompt file (default: src/prompts/investigate-bug.md)
   STATE_DIR                   State directory (default: .state)
 `.trim();
 

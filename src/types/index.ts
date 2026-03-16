@@ -7,7 +7,6 @@ export interface AppConfig {
   featureWorkItemIds: number[];
   targetRepoPath: string;
   maxInvestigationsPerDay: number;
-  skillsDir: string;
   pollIntervalMinutes: number;
   claudeModel: string;
   promptPath: string;
@@ -67,8 +66,3 @@ export interface ImageAttachment {
   alt: string;
 }
 
-/** A skill loaded from the skills directory. */
-export interface Skill {
-  name: string;
-  content: string;
-}

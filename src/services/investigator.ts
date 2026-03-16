@@ -2,7 +2,7 @@ import { readFileSync } from 'fs';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { PermissionResult, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages/messages';
-import type { AppConfig, ImageAttachment, Skill } from '../types/index.ts';
+import type { AppConfig, ImageAttachment } from '../types/index.ts';
 import type { DiscoveredSkill } from './skill-loader.ts';
 
 const DENIED_BASH_PATTERNS = [
@@ -47,7 +47,6 @@ export interface InvestigationContext {
   bugTitle: string;
   bugDescription: string;
   bugReproSteps: string;
-  skills: Skill[];
   discoveredSkills: DiscoveredSkill[];
   images: ImageAttachment[];
 }
@@ -93,7 +92,7 @@ export async function investigateBug(
   config: AppConfig,
   context: InvestigationContext,
 ): Promise<string> {
-  const systemPrompt = buildSystemPrompt(config.promptPath, context.skills, context.discoveredSkills);
+  const systemPrompt = buildSystemPrompt(config.promptPath, context.discoveredSkills);
 
   const hasImages = context.images.length > 0;
 
@@ -162,18 +161,10 @@ export async function investigateBug(
 
 export function buildSystemPrompt(
   promptPath: string,
-  skills: Skill[],
   discoveredSkills: DiscoveredSkill[] = [],
 ): string {
   const basePrompt = readFileSync(promptPath, 'utf-8');
   const sections: string[] = [basePrompt];
-
-  if (skills.length > 0) {
-    const skillSections = skills
-      .map((s) => `### Skill: ${s.name}\n${s.content}`)
-      .join('\n\n');
-    sections.push(`## Loaded Skills\n\n${skillSections}`);
-  }
 
   if (discoveredSkills.length > 0) {
     const listing = discoveredSkills

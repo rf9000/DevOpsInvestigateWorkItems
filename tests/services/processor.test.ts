@@ -13,7 +13,6 @@ function mockConfig(): AppConfig {
     featureWorkItemIds: [12345],
     targetRepoPath: 'C:/repos/my-repo',
     maxInvestigationsPerDay: 5,
-    skillsDir: '.claude/commands',
     assignedToFilter: [],
     pollIntervalMinutes: 5,
     claudeModel: 'claude-sonnet-4-6',
@@ -39,7 +38,6 @@ function makeDeps(overrides: Partial<ProcessorDeps> = {}): ProcessorDeps {
     ),
     investigateBug: mock(() => Promise.resolve('### Bug Validity\nYes\n\n### Root Cause\nToken validation missing.')),
     addWorkItemComment: mock(() => Promise.resolve({ id: 1, text: 'comment' })),
-    loadSkills: mock(() => Promise.resolve([])),
     discoverTargetRepoSkills: mock(() => []),
     downloadAttachment: mock(() =>
       Promise.resolve({
@@ -62,7 +60,6 @@ describe('processBug', () => {
     expect(deps.getWorkItem).toHaveBeenCalledTimes(1);
     expect(deps.investigateBug).toHaveBeenCalledTimes(1);
     expect(deps.addWorkItemComment).toHaveBeenCalledTimes(1);
-    expect(deps.loadSkills).toHaveBeenCalledTimes(1);
   });
 
   test('investigation failure returns investigated=false with error', async () => {
@@ -126,22 +123,6 @@ describe('processBug', () => {
     expect(context.bugTitle).toBe('Login crashes on expired token');
     expect(context.bugDescription).toBe('The login page crashes.');
     expect(context.bugReproSteps).toBe('1. Login\n2. Wait\n3. Crash');
-  });
-
-  test('loads skills and passes them to investigation context', async () => {
-    const config = mockConfig();
-    const skills = [{ name: 'test-skill', content: 'skill content' }];
-    const investigateMock = mock((_cfg: AppConfig, _ctx: unknown) => Promise.resolve('result'));
-    const deps = makeDeps({
-      loadSkills: mock(() => Promise.resolve(skills)),
-      investigateBug: investigateMock,
-    });
-
-    await processBug(config, 100, deps);
-
-    expect(investigateMock).toHaveBeenCalledTimes(1);
-    const context = investigateMock.mock.calls[0]![1] as { skills: typeof skills };
-    expect(context.skills).toEqual(skills);
   });
 
   test('extracts images from HTML and passes them in context', async () => {

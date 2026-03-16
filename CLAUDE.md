@@ -30,8 +30,9 @@ DevOpsPullTemplate is a GitHub template repository for Azure DevOps automation p
 ## File Layout
 
 - `src/config/` — Zod env validation
+- `src/prompts/` — AI prompt templates (investigation prompt)
 - `src/sdk/` — Azure DevOps REST client
-- `src/services/` — business logic (processor, watcher, AI generator)
+- `src/services/` — business logic (processor, watcher, skill discovery)
 - `src/state/` — JSON persistence
 - `src/types/` — shared interfaces
 - `tests/` — mirrors src/ structure

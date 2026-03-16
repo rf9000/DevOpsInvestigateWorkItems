@@ -16,7 +16,6 @@ function mockConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     featureWorkItemIds: [12345],
     targetRepoPath: 'C:/repos/my-repo',
     maxInvestigationsPerDay: 5,
-    skillsDir: '.claude/commands',
     assignedToFilter: [],
     pollIntervalMinutes: 5,
     claudeModel: 'claude-sonnet-4-6',
