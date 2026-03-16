@@ -26,6 +26,6 @@ ENV PATH="/home/claude/.local/bin:$PATH"
 VOLUME /app/.state
 VOLUME /home/claude/.claude
 
-COPY --chown=claude:claude entrypoint.sh /entrypoint.sh
+COPY --chown=claude:claude --chmod=755 entrypoint.sh /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
