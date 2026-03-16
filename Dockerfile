@@ -5,22 +5,27 @@ WORKDIR /app
 # Install git and curl (git for target repo, curl for Claude Code install)
 RUN apt-get update && apt-get install -y git curl bash && rm -rf /var/lib/apt/lists/*
 
-# Install Claude Code CLI (needed by @anthropic-ai/claude-agent-sdk)
-RUN curl -fsSL https://claude.ai/install.sh | bash
-ENV PATH="/root/.local/bin:$PATH"
-
-# Install dependencies
+# Install dependencies (as root before switching user)
 COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 
 # Copy application source
 COPY . .
 
+# Create non-root user for Claude Code (refuses --dangerously-skip-permissions as root)
+RUN useradd -m -s /bin/bash claude && \
+    chown -R claude:claude /app
+
+USER claude
+
+# Install Claude Code CLI as non-root user
+RUN curl -fsSL https://claude.ai/install.sh | bash
+ENV PATH="/home/claude/.local/bin:$PATH"
+
 # Persist state and Claude auth across restarts
 VOLUME /app/.state
-VOLUME /root/.claude
+VOLUME /home/claude/.claude
 
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY --chown=claude:claude entrypoint.sh /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
