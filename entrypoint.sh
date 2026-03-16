@@ -17,7 +17,7 @@ if [ "$(id -u)" = "0" ]; then
     fi
   fi
 
-  exec su claude -c "cd /app && bun run start"
+  exec su claude -c "export HOME=/home/claude && cd /app && bun run start"
 fi
 
 exec bun run start
