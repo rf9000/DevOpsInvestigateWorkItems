@@ -31,7 +31,7 @@ On first run, existing bugs are seeded as already-processed so only new bugs are
 | `AZURE_DEVOPS_ORG` | Azure DevOps organization name |
 | `AZURE_DEVOPS_PROJECT` | Azure DevOps project name |
 | `FEATURE_WORK_ITEM_IDS` | Comma-separated feature work item IDs to watch |
-| `TARGET_REPO_PATH` | Local path to the repository for Claude to investigate |
+| `TARGET_REPO_PATH` | Path to the target repository (mounted from host in Docker, local path otherwise) |
 
 ### Optional environment variables
 
@@ -61,12 +61,25 @@ Add `--dry-run` to `watch`, `run-once`, or `run-bug` to skip writing comments to
 
 ## VM Deployment (Docker)
 
-The service runs on an Azure VM using Docker Compose. The container clones the target repo, polls Azure DevOps, and runs Claude Code investigations automatically.
+The service runs on an Azure VM using Docker Compose. Target repos are cloned on the VM host under `~/repos/` and mounted into containers as volumes. This allows multiple services to share the same repo, makes repos browsable via tools like WinSCP, and avoids duplicate clones.
 
 ### Prerequisites
 
 - SSH access to the VM
 - A Claude Code team subscription (for OAuth authentication)
+
+### Directory Structure
+
+```
+~/repos/                         # Shared repos (cloned once, used by any service)
+  continia-banking/
+  other-repo/
+~/teams/                         # Per-team service deployments
+  continia-banking/
+    docker-compose.yml
+    .env.investigate
+    DevOpsInvestigateWorkItems/  # This repo (cloned)
+```
 
 ### Initial Setup
 
@@ -75,18 +88,24 @@ The service runs on an Azure VM using Docker Compose. The container clones the t
    ssh -i "vm-devops-automation_key.pem" azureuser@<VM_IP>
    ```
 
-2. Navigate to the team directory:
+2. Clone the target repo to the shared repos directory:
+   ```bash
+   mkdir -p ~/repos
+   git clone <target-repo-url> ~/repos/<repo-name>
+   ```
+
+3. Navigate to the team directory:
    ```bash
    cd ~/teams/<team-name>
    ```
 
-3. Install Claude Code CLI on the **VM host** (not inside Docker):
+4. Install Claude Code CLI on the **VM host** (not inside Docker):
    ```bash
    curl -fsSL https://claude.ai/install.sh | bash
    source ~/.bashrc
    ```
 
-4. Authenticate Claude Code. The VM has no browser, so use an extended timeout to give yourself time to complete the OAuth flow:
+5. Authenticate Claude Code. The VM has no browser, so use an extended timeout to give yourself time to complete the OAuth flow:
    ```bash
    ANTHROPIC_AUTH_TIMEOUT=300000 claude auth login
    ```
@@ -94,15 +113,16 @@ The service runs on an Azure VM using Docker Compose. The container clones the t
    - Sign in and authorize
    - Paste the code back into the VM terminal when prompted
 
-5. Configure `.env.investigate` with your Azure DevOps settings.
+6. Configure `.env.investigate` with your Azure DevOps settings.
 
-6. Ensure `docker-compose.yml` bind-mounts the host credentials into the container:
+7. Ensure `docker-compose.yml` mounts the shared repo and host credentials into the container:
    ```yaml
    volumes:
      - /home/azureuser/.claude:/home/claude/.claude
+     - /home/azureuser/repos/<repo-name>:/repo:ro
    ```
 
-7. Build and start:
+8. Build and start:
    ```bash
    docker compose build --no-cache investigate-work-items
    docker compose up -d
@@ -119,7 +139,18 @@ The service runs on an Azure VM using Docker Compose. The container clones the t
 | `docker compose down && docker compose up -d` | Recreate containers |
 | `docker compose build --no-cache investigate-work-items && docker compose up -d` | Full rebuild and restart |
 
-### Deploying Changes
+### Updating the Target Repo
+
+The target repo is cloned on the host and mounted read-only. To update it:
+
+```bash
+cd ~/repos/<repo-name>
+git pull
+```
+
+No container restart needed — the mount reflects the latest files immediately.
+
+### Deploying Service Changes
 
 ```bash
 cd ~/teams/<team-name>/DevOpsInvestigateWorkItems
@@ -170,7 +201,7 @@ docker compose restart investigate-work-items
 - The container starts as **root** to fix volume permissions, then drops to a non-root `claude` user via the entrypoint
 - Claude Code refuses `--dangerously-skip-permissions` (used by the Agent SDK) when running as root, which is why the non-root user is required
 - The entrypoint runs `chown -R` on mounted volumes before dropping privileges, since bind mounts retain host uid/gid
-- The target repo is cloned into `/repo` inside the container on startup
+- The target repo is mounted from the host (`~/repos/<name>:/repo:ro`), not cloned inside the container
 - State (processed bugs) is persisted via a Docker volume at `/app/.state`
 - Claude auth is bind-mounted from the VM host (`/home/azureuser/.claude:/home/claude/.claude`)
 
