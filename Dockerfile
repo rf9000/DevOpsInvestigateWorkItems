@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y git curl bash && rm -rf /var/lib/apt/li
 
 # Install Claude Code CLI (needed by @anthropic-ai/claude-agent-sdk)
 RUN curl -fsSL https://claude.ai/install.sh | bash
+ENV PATH="/root/.local/bin:$PATH"
 
 # Install dependencies
 COPY package.json bun.lock ./
