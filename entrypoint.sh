@@ -13,6 +13,16 @@ if [ "$(id -u)" = "0" ]; then
     exit 1
   fi
 
+  # Fix ownership of writable repo mounts (e.g., online-repos mounted :rw for cloning)
+  # Skip read-only mounts to avoid slow no-op chown -R on large repos
+  for dir in /repos/*/; do
+    [ ! -d "$dir" ] && continue
+    if touch "$dir/.chown-test" 2>/dev/null; then
+      rm -f "$dir/.chown-test"
+      chown -R claude:claude "$dir"
+    fi
+  done
+
   # Generate repo-paths.json from mounted repos under /repos/
   REPO_PATHS_FILE=""
   if [ -d "/repos" ]; then

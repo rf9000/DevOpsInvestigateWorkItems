@@ -170,7 +170,7 @@ The service runs on an Azure VM using Docker Compose. Target repos are cloned on
      - /home/azureuser/.claude:/home/claude/.claude
      - /home/azureuser/repos/<target-repo>:/repos/<target-repo>:ro
      - /home/azureuser/repos/<dependency-1>:/repos/<dependency-1>:ro
-     - /home/azureuser/repos/<dependency-2>:/repos/<dependency-2>:ro
+     - /home/azureuser/repos/<dependency-2>:/repos/<dependency-2>:rw  # :rw if skills need to clone into it
    ```
 
 8. Build and start:
@@ -244,6 +244,7 @@ This is a breaking change — all three steps must happen together:
    volumes:
      - /home/azureuser/repos/<target-repo>:/repos/<target-repo>:ro
      - /home/azureuser/repos/<dependency-1>:/repos/<dependency-1>:ro
+     - /home/azureuser/repos/<dependency-2>:/repos/<dependency-2>:rw  # :rw if skills clone into it
    ```
 
 3. Update `.env.investigate`:
@@ -287,7 +288,7 @@ This is a breaking change — all three steps must happen together:
 - The container starts as **root** to fix volume permissions, then drops to a non-root `claude` user via the entrypoint
 - Claude Code refuses `--dangerously-skip-permissions` (used by the Agent SDK) when running as root, which is why the non-root user is required
 - The entrypoint runs `chown -R` on mounted volumes before dropping privileges, since bind mounts retain host uid/gid
-- Repos are mounted from the host (`~/repos/<name>:/repos/<name>:ro`), not cloned inside the container
+- Repos are mounted from the host (`~/repos/<name>:/repos/<name>:ro`), not cloned inside the container. Use `:rw` for repos that skills need to clone into (e.g., a directory of per-bank microservice repos)
 - The entrypoint auto-generates `/tmp/repo-paths.json` mapping external repos for skills to consume
 - State (processed bugs) is persisted via a Docker volume at `/app/.state`
 - Claude auth is bind-mounted from the VM host (`/home/azureuser/.claude:/home/claude/.claude`)
