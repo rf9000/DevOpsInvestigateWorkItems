@@ -15,7 +15,7 @@ COPY . .
 # Create non-root user for Claude Code (refuses --dangerously-skip-permissions as root)
 RUN useradd -m -s /bin/bash claude && \
     chown -R claude:claude /app && \
-    mkdir -p /repo && chown claude:claude /repo
+    mkdir -p /repos
 
 # Install Claude Code CLI as non-root user
 USER claude
