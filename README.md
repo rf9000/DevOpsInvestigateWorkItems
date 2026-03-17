@@ -225,6 +225,41 @@ Then restart the container:
 docker compose restart investigate-work-items
 ```
 
+### Migrating from Single-Repo (/repo) to Multi-Repo (/repos/)
+
+This is a breaking change — all three steps must happen together:
+
+1. Clone any additional dependency repos to `~/repos/`:
+   ```bash
+   git clone <dependency-repo-url> ~/repos/<dependency-name>
+   ```
+
+2. Update `docker-compose.yml` volumes from single mount to multi-mount:
+   ```yaml
+   # Old (single repo)
+   volumes:
+     - /home/azureuser/repos/<repo-name>:/repo:ro
+
+   # New (multi-repo)
+   volumes:
+     - /home/azureuser/repos/<target-repo>:/repos/<target-repo>:ro
+     - /home/azureuser/repos/<dependency-1>:/repos/<dependency-1>:ro
+   ```
+
+3. Update `.env.investigate`:
+   ```bash
+   # Old
+   TARGET_REPO_PATH=/repo
+   # New
+   TARGET_REPO_PATH=/repos/<target-repo>
+   ```
+
+4. Rebuild and restart:
+   ```bash
+   docker compose build --no-cache investigate-work-items
+   docker compose up -d
+   ```
+
 ### Troubleshooting
 
 **"Claude Code process exited with code 1" with no other details**
