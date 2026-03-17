@@ -36,7 +36,7 @@ On first run, existing bugs are seeded as already-processed so only new bugs are
 │  │  Docker Container            │               │         │    │
 │  │        │                     │               │         │    │
 │  │        ▼                     ▼               ▼         │    │
-│  │   /repo            ┌─────────────────┐  /app           │    │
+│  │   /repos/          ┌─────────────────┐  /app           │    │
 │  │   (read-only)      │    Watcher      │  (service)      │    │
 │  │        │           │  poll ► fetch ► │                  │    │
 │  │        │           │  investigate ►  │                  │    │
@@ -56,7 +56,7 @@ On first run, existing bugs are seeded as already-processed so only new bugs are
 └────────────────────────────────────────────────────────────────┘
 ```
 
-The service runs as a Docker container on an Azure VM. Target repositories are cloned once on the VM host under `~/repos/` and bind-mounted read-only into containers. This allows multiple services to share the same repo, makes repos browsable via WinSCP/SSH, and avoids duplicate clones.
+The service runs as a Docker container on an Azure VM. Target repositories and their dependencies are cloned once on the VM host under `~/repos/` and bind-mounted read-only into containers under `/repos/`. Skills in the target repo can access external repos via a `repo-paths.json` config file that is auto-generated at container startup.
 
 ## Setup
 
@@ -119,7 +119,9 @@ The service runs on an Azure VM using Docker Compose. Target repos are cloned on
 ```
 ~/repos/                         # Shared repos (cloned once, used by any service)
   continia-banking/
-  other-repo/
+  online-repos/
+  setup-files/
+  document-output/
 ~/teams/                         # Per-team service deployments
   continia-banking/
     docker-compose.yml
@@ -134,10 +136,11 @@ The service runs on an Azure VM using Docker Compose. Target repos are cloned on
    ssh -i "vm-devops-automation_key.pem" azureuser@<VM_IP>
    ```
 
-2. Clone the target repo to the shared repos directory:
+2. Clone the target repo and any dependency repos to the shared repos directory:
    ```bash
    mkdir -p ~/repos
    git clone <target-repo-url> ~/repos/<repo-name>
+   git clone <dependency-repo-url> ~/repos/<dependency-name>
    ```
 
 3. Navigate to the team directory:
@@ -161,11 +164,13 @@ The service runs on an Azure VM using Docker Compose. Target repos are cloned on
 
 6. Configure `.env.investigate` with your Azure DevOps settings.
 
-7. Ensure `docker-compose.yml` mounts the shared repo and host credentials into the container:
+7. Ensure `docker-compose.yml` mounts all needed repos and host credentials into the container:
    ```yaml
    volumes:
      - /home/azureuser/.claude:/home/claude/.claude
-     - /home/azureuser/repos/<repo-name>:/repo:ro
+     - /home/azureuser/repos/<target-repo>:/repos/<target-repo>:ro
+     - /home/azureuser/repos/<dependency-1>:/repos/<dependency-1>:ro
+     - /home/azureuser/repos/<dependency-2>:/repos/<dependency-2>:ro
    ```
 
 8. Build and start:
@@ -185,9 +190,9 @@ The service runs on an Azure VM using Docker Compose. Target repos are cloned on
 | `docker compose down && docker compose up -d` | Recreate containers |
 | `docker compose build --no-cache investigate-work-items && docker compose up -d` | Full rebuild and restart |
 
-### Updating the Target Repo
+### Updating Repos
 
-The target repo is cloned on the host and mounted read-only. To update it:
+Repos are cloned on the host and mounted read-only. To update any repo:
 
 ```bash
 cd ~/repos/<repo-name>
@@ -247,9 +252,36 @@ docker compose restart investigate-work-items
 - The container starts as **root** to fix volume permissions, then drops to a non-root `claude` user via the entrypoint
 - Claude Code refuses `--dangerously-skip-permissions` (used by the Agent SDK) when running as root, which is why the non-root user is required
 - The entrypoint runs `chown -R` on mounted volumes before dropping privileges, since bind mounts retain host uid/gid
-- The target repo is mounted from the host (`~/repos/<name>:/repo:ro`), not cloned inside the container
+- Repos are mounted from the host (`~/repos/<name>:/repos/<name>:ro`), not cloned inside the container
+- The entrypoint auto-generates `/tmp/repo-paths.json` mapping external repos for skills to consume
 - State (processed bugs) is persisted via a Docker volume at `/app/.state`
 - Claude auth is bind-mounted from the VM host (`/home/azureuser/.claude:/home/claude/.claude`)
+
+### Multi-Repo Support (repo-paths.json)
+
+Skills in the target repo may need access to external repos (e.g., microservice code, config files). These are mounted alongside the target repo under `/repos/` and made discoverable via a `repo-paths.json` config file.
+
+**In Docker:** The entrypoint auto-generates `/tmp/repo-paths.json` by scanning `/repos/` for directories other than the target repo. The file maps directory names to paths:
+
+```json
+{
+  "online-repos": "/repos/online-repos",
+  "setup-files": "/repos/setup-files"
+}
+```
+
+The `REPO_PATHS_FILE` environment variable is set to `/tmp/repo-paths.json` so skills can find it.
+
+**For local development:** Create `.claude/repo-paths.json` in the target repo (this file should be gitignored):
+
+```json
+{
+  "online-repos": "C:\\GeneralDev\\OnlineRepos",
+  "setup-files": "C:\\GeneralDev\\AL\\Continia Banking Master\\Continia Banking - Setup Files"
+}
+```
+
+Skills resolve repo paths by checking `$REPO_PATHS_FILE` first (Docker), then falling back to `.claude/repo-paths.json` (local dev).
 
 ## Project structure
 
