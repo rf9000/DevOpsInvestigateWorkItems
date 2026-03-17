@@ -13,7 +13,27 @@ if [ "$(id -u)" = "0" ]; then
     exit 1
   fi
 
-  exec su claude -c "export HOME=/home/claude && cd /app && bun run start"
+  # Generate repo-paths.json from mounted repos under /repos/
+  REPO_PATHS_FILE=""
+  if [ -d "/repos" ]; then
+    TARGET_DIR=$(basename "$TARGET_REPO_PATH")
+    JSON="{"
+    FIRST=true
+    for dir in /repos/*/; do
+      [ ! -d "$dir" ] && continue
+      name=$(basename "$dir")
+      [ "$name" = "$TARGET_DIR" ] && continue
+      $FIRST && FIRST=false || JSON="$JSON,"
+      JSON="$JSON\"$name\":\"${dir%/}\""
+    done
+    JSON="$JSON}"
+    echo "$JSON" > /tmp/repo-paths.json
+    chown claude:claude /tmp/repo-paths.json
+    REPO_PATHS_FILE=/tmp/repo-paths.json
+    echo "Generated repo-paths.json: $JSON"
+  fi
+
+  exec su claude -c "export HOME=/home/claude REPO_PATHS_FILE=$REPO_PATHS_FILE && cd /app && bun run start"
 fi
 
 exec bun run start
