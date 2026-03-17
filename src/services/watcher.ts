@@ -51,7 +51,7 @@ export async function runPollCycle(
   const bugIds = await deps.queryBugsUnderFeatures(config, config.featureWorkItemIds);
   const newBugIds = bugIds.filter((id) => !stateStore.isProcessed(id));
 
-  log(`Found ${bugIds.length} work items, ${newBugIds.length} unprocessed`);
+  log(`Found ${bugIds.length} work items, ${newBugIds.length} new, ${bugIds.length - newBugIds.length} already processed`);
 
   let investigated = 0;
   let skipped = 0;
