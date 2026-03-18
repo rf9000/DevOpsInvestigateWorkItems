@@ -179,6 +179,24 @@ The service runs on an Azure VM using Docker Compose. Target repos are cloned on
    docker compose up -d
    ```
 
+### Starting After VM Restart
+
+If the VM was stopped and restarted, Docker containers will not be running. SSH in and start them:
+
+```bash
+ssh -i "vm-devops-automation_key.pem" azureuser@<VM_IP>
+cd ~/teams/<team-name>
+docker compose up -d
+```
+
+Verify it's running:
+
+```bash
+docker compose logs -f investigate-work-items
+```
+
+If you see auth errors in the logs, re-authenticate (see [Re-authenticating Claude Code](#re-authenticating-claude-code) below).
+
 ### Common Commands
 
 | Command | Description |
