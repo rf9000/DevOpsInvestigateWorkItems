@@ -7,6 +7,8 @@ import {
   getWorkItem,
   updateWorkItemField,
   queryBugsUnderFeatures,
+  queryTaggedBugsUnderFeatures,
+  removeTagFromWorkItem,
   addWorkItemComment,
   downloadAttachment,
 } from '../../src/sdk/azure-devops-client.ts';
@@ -24,6 +26,7 @@ function mockConfig(): AppConfig {
     targetRepoPath: 'C:/repos/my-repo',
     maxInvestigationsPerDay: 5,
     assignedToFilter: [],
+    reinvestigateTag: 'agent investigate',
     pollIntervalMinutes: 5,
     claudeModel: 'claude-sonnet-4-6',
     promptPath: './prompt.md',
@@ -318,6 +321,143 @@ describe('queryBugsUnderFeatures', () => {
     const init = call[1] as RequestInit;
     const body = JSON.parse(init.body as string) as { query: string };
     expect(body.query).not.toContain('AssignedTo');
+  });
+});
+
+describe('queryTaggedBugsUnderFeatures', () => {
+  test('includes tag filter in WIQL and omits AssignedTo filter', async () => {
+    const wiqlResponse = {
+      workItemRelations: [
+        { source: { id: 12345 }, target: { id: 100 }, rel: null },
+      ],
+    };
+    setMockFetch(wiqlResponse);
+    const config = { ...mockConfig(), assignedToFilter: ['Alice Smith'] };
+
+    const result = await queryTaggedBugsUnderFeatures(config, [12345], 'agent investigate');
+
+    expect(result).toEqual([100]);
+
+    const call = mockFn.mock.calls[0]!;
+    const init = call[1] as RequestInit;
+    const body = JSON.parse(init.body as string) as { query: string };
+    expect(body.query).toContain("CONTAINS 'agent investigate'");
+    expect(body.query).not.toContain('AssignedTo');
+  });
+
+  test('deduplicates tagged bug IDs', async () => {
+    const wiqlResponse = {
+      workItemRelations: [
+        { source: { id: 12345 }, target: { id: 100 }, rel: null },
+        { source: { id: 67890 }, target: { id: 100 }, rel: null },
+      ],
+    };
+    setMockFetch(wiqlResponse);
+    const config = mockConfig();
+
+    const result = await queryTaggedBugsUnderFeatures(config, [12345, 67890], 'agent investigate');
+    expect(result).toEqual([100]);
+  });
+
+  test('returns empty array when no tagged items found', async () => {
+    setMockFetch({ workItemRelations: [] });
+    const config = mockConfig();
+
+    const result = await queryTaggedBugsUnderFeatures(config, [12345], 'agent investigate');
+    expect(result).toEqual([]);
+  });
+});
+
+describe('removeTagFromWorkItem', () => {
+  test('fetches work item, removes target tag, and updates field', async () => {
+    // First call: getWorkItem, second call: updateWorkItemField
+    setSequentialMockFetch(
+      {
+        body: {
+          id: 100,
+          fields: { 'System.Tags': 'agent investigate; priority; urgent' },
+          rev: 3,
+          url: 'https://example.com/100',
+        },
+      },
+      {
+        body: {
+          id: 100,
+          fields: { 'System.Tags': 'priority; urgent' },
+          rev: 4,
+          url: 'https://example.com/100',
+        },
+      },
+    );
+    const config = mockConfig();
+
+    await removeTagFromWorkItem(config, 100, 'agent investigate');
+
+    expect(mockFn).toHaveBeenCalledTimes(2);
+
+    // Verify the PATCH call has the correct tags (without "agent investigate")
+    const patchCall = mockFn.mock.calls[1]!;
+    const init = patchCall[1] as RequestInit;
+    const body = JSON.parse(init.body as string) as Array<{ op: string; path: string; value: string }>;
+    expect(body[0]!.value).toBe('priority; urgent');
+  });
+
+  test('handles case-insensitive tag removal', async () => {
+    setSequentialMockFetch(
+      {
+        body: {
+          id: 100,
+          fields: { 'System.Tags': 'Agent Investigate; other-tag' },
+          rev: 3,
+          url: 'https://example.com/100',
+        },
+      },
+      {
+        body: {
+          id: 100,
+          fields: { 'System.Tags': 'other-tag' },
+          rev: 4,
+          url: 'https://example.com/100',
+        },
+      },
+    );
+    const config = mockConfig();
+
+    await removeTagFromWorkItem(config, 100, 'agent investigate');
+
+    const patchCall = mockFn.mock.calls[1]!;
+    const init = patchCall[1] as RequestInit;
+    const body = JSON.parse(init.body as string) as Array<{ op: string; path: string; value: string }>;
+    expect(body[0]!.value).toBe('other-tag');
+  });
+
+  test('sets empty tags when removing the only tag', async () => {
+    setSequentialMockFetch(
+      {
+        body: {
+          id: 100,
+          fields: { 'System.Tags': 'agent investigate' },
+          rev: 3,
+          url: 'https://example.com/100',
+        },
+      },
+      {
+        body: {
+          id: 100,
+          fields: { 'System.Tags': '' },
+          rev: 4,
+          url: 'https://example.com/100',
+        },
+      },
+    );
+    const config = mockConfig();
+
+    await removeTagFromWorkItem(config, 100, 'agent investigate');
+
+    const patchCall = mockFn.mock.calls[1]!;
+    const init = patchCall[1] as RequestInit;
+    const body = JSON.parse(init.body as string) as Array<{ op: string; path: string; value: string }>;
+    expect(body[0]!.value).toBe('');
   });
 });
 

@@ -12,6 +12,7 @@ const envSchema = z.object({
   CLAUDE_MODEL: z.string().default("claude-sonnet-4-6"),
   PROMPT_PATH: z.string().default("src/prompts/investigate-bug.md"),
   ASSIGNED_TO_FILTER: z.string().optional(),
+  REINVESTIGATE_TAG: z.string().default("agent investigate"),
   STATE_DIR: z.string().default(".state"),
 });
 
@@ -57,6 +58,7 @@ export function loadConfig(
     claudeModel: parsed.CLAUDE_MODEL,
     promptPath: parsed.PROMPT_PATH,
     assignedToFilter,
+    reinvestigateTag: parsed.REINVESTIGATE_TAG,
     stateDir: parsed.STATE_DIR,
     dryRun: false,
   };

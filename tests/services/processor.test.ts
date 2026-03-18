@@ -14,6 +14,7 @@ function mockConfig(): AppConfig {
     targetRepoPath: 'C:/repos/my-repo',
     maxInvestigationsPerDay: 5,
     assignedToFilter: [],
+    reinvestigateTag: 'agent investigate',
     pollIntervalMinutes: 5,
     claudeModel: 'claude-sonnet-4-6',
     promptPath: './prompt.md',

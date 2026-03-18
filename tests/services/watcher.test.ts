@@ -17,6 +17,7 @@ function mockConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     targetRepoPath: 'C:/repos/my-repo',
     maxInvestigationsPerDay: 5,
     assignedToFilter: [],
+    reinvestigateTag: 'agent investigate',
     pollIntervalMinutes: 5,
     claudeModel: 'claude-sonnet-4-6',
     promptPath: './prompt.md',
@@ -29,9 +30,11 @@ function mockConfig(overrides: Partial<AppConfig> = {}): AppConfig {
 function makeDeps(overrides: Partial<WatcherDeps> = {}): WatcherDeps {
   return {
     queryBugsUnderFeatures: mock(() => Promise.resolve([])),
+    queryTaggedBugsUnderFeatures: mock(() => Promise.resolve([])),
     processBug: mock(() =>
       Promise.resolve({ bugId: 0, investigated: true }),
     ),
+    removeTagFromWorkItem: mock(() => Promise.resolve()),
     ...overrides,
   };
 }
@@ -170,6 +173,129 @@ describe('runPollCycle', () => {
     expect(stateStore.isProcessed(501)).toBe(true);
     expect(stateStore.isProcessed(502)).toBe(true);
     expect(stateStore.isProcessed(503)).toBe(false);
+  });
+
+  test('tagged item is reinvestigated even if already processed', async () => {
+    const config = mockConfig();
+
+    // Mark bug 200 as already processed
+    stateStore.markProcessed(200);
+    stateStore.save();
+
+    const deps = makeDeps({
+      queryBugsUnderFeatures: mock(() => Promise.resolve([200])),
+      queryTaggedBugsUnderFeatures: mock(() => Promise.resolve([200])),
+      processBug: mock(() =>
+        Promise.resolve({ bugId: 200, investigated: true }),
+      ),
+    });
+
+    const result = await runPollCycle(config, stateStore, deps);
+
+    expect(result.investigated).toBe(1);
+    expect(deps.processBug).toHaveBeenCalledTimes(1);
+  });
+
+  test('tag is removed after successful reinvestigation', async () => {
+    const config = mockConfig();
+
+    stateStore.markProcessed(200);
+    stateStore.save();
+
+    const removeTagMock = mock(() => Promise.resolve());
+    const deps = makeDeps({
+      queryBugsUnderFeatures: mock(() => Promise.resolve([200])),
+      queryTaggedBugsUnderFeatures: mock(() => Promise.resolve([200])),
+      processBug: mock(() =>
+        Promise.resolve({ bugId: 200, investigated: true }),
+      ),
+      removeTagFromWorkItem: removeTagMock,
+    });
+
+    await runPollCycle(config, stateStore, deps);
+
+    expect(removeTagMock).toHaveBeenCalledTimes(1);
+    expect(removeTagMock).toHaveBeenCalledWith(config, 200, 'agent investigate');
+  });
+
+  test('tag is not removed when investigation fails', async () => {
+    const config = mockConfig();
+
+    stateStore.markProcessed(200);
+    stateStore.save();
+
+    const removeTagMock = mock(() => Promise.resolve());
+    const deps = makeDeps({
+      queryBugsUnderFeatures: mock(() => Promise.resolve([200])),
+      queryTaggedBugsUnderFeatures: mock(() => Promise.resolve([200])),
+      processBug: mock(() =>
+        Promise.resolve({ bugId: 200, investigated: false, error: 'AI failed' }),
+      ),
+      removeTagFromWorkItem: removeTagMock,
+    });
+
+    await runPollCycle(config, stateStore, deps);
+
+    expect(removeTagMock).toHaveBeenCalledTimes(0);
+  });
+
+  test('tag removal failure does not break the cycle', async () => {
+    const config = mockConfig();
+
+    stateStore.markProcessed(200);
+    stateStore.save();
+
+    const deps = makeDeps({
+      queryBugsUnderFeatures: mock(() => Promise.resolve([200])),
+      queryTaggedBugsUnderFeatures: mock(() => Promise.resolve([200])),
+      processBug: mock(() =>
+        Promise.resolve({ bugId: 200, investigated: true }),
+      ),
+      removeTagFromWorkItem: mock(() => Promise.reject(new Error('API error'))),
+    });
+
+    const result = await runPollCycle(config, stateStore, deps);
+
+    // Investigation still counts as success despite tag removal failure
+    expect(result.investigated).toBe(1);
+    expect(result.errors).toBe(0);
+  });
+
+  test('new items and tagged items are deduplicated', async () => {
+    const config = mockConfig();
+
+    const deps = makeDeps({
+      queryBugsUnderFeatures: mock(() => Promise.resolve([100, 200])),
+      queryTaggedBugsUnderFeatures: mock(() => Promise.resolve([200])),
+      processBug: mock((cfg: AppConfig, bugId: number) =>
+        Promise.resolve({ bugId, investigated: true }),
+      ),
+    });
+
+    const result = await runPollCycle(config, stateStore, deps);
+
+    // 100 is new, 200 is new AND tagged — should only be processed once
+    expect(result.investigated).toBe(2);
+    expect(deps.processBug).toHaveBeenCalledTimes(2);
+  });
+
+  test('tagged items from outside assigned-to filter are investigated', async () => {
+    const config = mockConfig({ assignedToFilter: ['Alice Smith'] });
+
+    // Regular query (filtered by assigned-to) returns nothing
+    // Tag query (no assigned-to filter) finds item 300
+    const deps = makeDeps({
+      queryBugsUnderFeatures: mock(() => Promise.resolve([])),
+      queryTaggedBugsUnderFeatures: mock(() => Promise.resolve([300])),
+      processBug: mock(() =>
+        Promise.resolve({ bugId: 300, investigated: true }),
+      ),
+    });
+
+    const result = await runPollCycle(config, stateStore, deps);
+
+    expect(result.investigated).toBe(1);
+    expect(deps.processBug).toHaveBeenCalledTimes(1);
   });
 
   test('prunes processed IDs not returned by current query', async () => {

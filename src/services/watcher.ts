@@ -12,15 +12,29 @@ export interface WatcherDeps {
     featureIds: number[],
   ) => Promise<number[]>;
 
+  queryTaggedBugsUnderFeatures: (
+    config: AppConfig,
+    featureIds: number[],
+    tag: string,
+  ) => Promise<number[]>;
+
   processBug: (
     config: AppConfig,
     bugId: number,
   ) => Promise<BugProcessResult>;
+
+  removeTagFromWorkItem: (
+    config: AppConfig,
+    workItemId: number,
+    tagToRemove: string,
+  ) => Promise<void>;
 }
 
 const defaultDeps: WatcherDeps = {
   queryBugsUnderFeatures: sdk.queryBugsUnderFeatures,
+  queryTaggedBugsUnderFeatures: sdk.queryTaggedBugsUnderFeatures,
   processBug: proc.processBug,
+  removeTagFromWorkItem: sdk.removeTagFromWorkItem,
 };
 
 function log(message: string): void {
@@ -51,17 +65,29 @@ export async function runPollCycle(
   const bugIds = await deps.queryBugsUnderFeatures(config, config.featureWorkItemIds);
   const newBugIds = bugIds.filter((id) => !stateStore.isProcessed(id));
 
-  log(`Found ${bugIds.length} work items, ${newBugIds.length} new, ${bugIds.length - newBugIds.length} already processed`);
+  // 3. Query for tagged items (bypasses assigned-to filter and processed state)
+  let taggedBugIds: number[] = [];
+  if (config.reinvestigateTag) {
+    taggedBugIds = await deps.queryTaggedBugsUnderFeatures(
+      config, config.featureWorkItemIds, config.reinvestigateTag,
+    );
+  }
+  const taggedSet = new Set(taggedBugIds);
+
+  // Merge new items + tagged items (deduplicated)
+  const toInvestigate = [...new Set([...newBugIds, ...taggedBugIds])];
+
+  log(`Found ${bugIds.length} work items, ${newBugIds.length} new, ${taggedBugIds.length} tagged for reinvestigation, ${bugIds.length - newBugIds.length} already processed`);
 
   let investigated = 0;
   let skipped = 0;
   let errors = 0;
 
-  for (const bugId of newBugIds) {
-    // 3. Check daily limit
+  for (const bugId of toInvestigate) {
+    // 4. Check daily limit
     if (!stateStore.canInvestigateToday(config.maxInvestigationsPerDay)) {
       log(`Daily investigation limit reached (${config.maxInvestigationsPerDay}). Skipping remaining bugs.`);
-      skipped += newBugIds.length - (investigated + errors);
+      skipped += toInvestigate.length - (investigated + errors);
       break;
     }
 
@@ -72,6 +98,16 @@ export async function runPollCycle(
         stateStore.markProcessed(bugId);
         stateStore.incrementDailyCount();
         investigated++;
+
+        // Remove reinvestigation tag after successful investigation
+        if (taggedSet.has(bugId)) {
+          try {
+            await deps.removeTagFromWorkItem(config, bugId, config.reinvestigateTag);
+            log(`Bug #${bugId}: Removed "${config.reinvestigateTag}" tag`);
+          } catch (tagErr) {
+            log(`Bug #${bugId}: Warning — failed to remove tag: ${tagErr}`);
+          }
+        }
       } else {
         errors++;
       }
@@ -81,7 +117,8 @@ export async function runPollCycle(
     }
   }
 
-  stateStore.pruneProcessed(bugIds);
+  const allKnownIds = [...new Set([...bugIds, ...taggedBugIds])];
+  stateStore.pruneProcessed(allKnownIds);
   stateStore.save();
   return { investigated, skipped, errors };
 }

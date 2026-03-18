@@ -59,6 +59,7 @@ describe("loadConfig", () => {
     expect(config.claudeModel).toBe("claude-sonnet-4-6");
     expect(config.promptPath).toBe("src/prompts/investigate-bug.md");
     expect(config.assignedToFilter).toEqual([]);
+    expect(config.reinvestigateTag).toBe("agent investigate");
     expect(config.stateDir).toBe(".state");
   });
 
@@ -123,6 +124,17 @@ describe("loadConfig", () => {
   it("returns empty assignedToFilter when not set", () => {
     const config = loadConfig(validEnv);
     expect(config.assignedToFilter).toEqual([]);
+  });
+
+  it("uses default reinvestigateTag when not set", () => {
+    const config = loadConfig(validEnv);
+    expect(config.reinvestigateTag).toBe("agent investigate");
+  });
+
+  it("overrides reinvestigateTag when REINVESTIGATE_TAG is set", () => {
+    const env = { ...validEnv, REINVESTIGATE_TAG: "please investigate" };
+    const config = loadConfig(env);
+    expect(config.reinvestigateTag).toBe("please investigate");
   });
 
   it("derives orgUrl from org name", () => {

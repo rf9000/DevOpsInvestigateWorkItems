@@ -11,6 +11,7 @@ export interface AppConfig {
   claudeModel: string;
   promptPath: string;
   assignedToFilter: string[];
+  reinvestigateTag: string;
   stateDir: string;
   dryRun: boolean;
 }

@@ -143,6 +143,46 @@ export async function queryBugsUnderFeatures(
   return [...new Set(bugIds)];
 }
 
+export async function queryTaggedBugsUnderFeatures(
+  config: AppConfig,
+  featureIds: number[],
+  tag: string,
+): Promise<number[]> {
+  const idList = featureIds.join(',');
+  const wiql = `SELECT [System.Id] FROM WorkItemLinks WHERE [Source].[System.Id] IN (${idList}) AND [Target].[System.WorkItemType] IN ('Bug', 'User Story') AND [Target].[System.State] NOT IN ('Resolved', 'Closed', 'Removed') AND [Target].[System.Tags] CONTAINS '${tag}' MODE (MustContain)`;
+
+  const path = 'wit/wiql?api-version=7.0';
+  const data = await adoFetchWithRetry<WiqlResponse>(config, path, {
+    method: 'POST',
+    body: JSON.stringify({ query: wiql }),
+  });
+
+  const featureIdSet = new Set(featureIds);
+  const bugIds: number[] = [];
+  for (const rel of data.workItemRelations ?? []) {
+    if (rel.target?.id && !featureIdSet.has(rel.target.id)) {
+      bugIds.push(rel.target.id);
+    }
+  }
+
+  return [...new Set(bugIds)];
+}
+
+export async function removeTagFromWorkItem(
+  config: AppConfig,
+  workItemId: number,
+  tagToRemove: string,
+): Promise<void> {
+  const workItem = await getWorkItem(config, workItemId);
+  const currentTags = String(workItem.fields['System.Tags'] ?? '');
+  const tags = currentTags
+    .split(';')
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0 && t.toLowerCase() !== tagToRemove.toLowerCase());
+  const newTags = tags.join('; ');
+  await updateWorkItemField(config, workItemId, 'System.Tags', newTags);
+}
+
 export interface AttachmentDownload {
   data: Buffer;
   mediaType: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
