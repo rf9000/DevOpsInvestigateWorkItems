@@ -143,13 +143,18 @@ export async function queryBugsUnderFeatures(
   return [...new Set(bugIds)];
 }
 
+interface WorkItemsBatchResponse {
+  value: Array<{ id: number; fields: Record<string, unknown> }>;
+}
+
 export async function queryTaggedBugsUnderFeatures(
   config: AppConfig,
   featureIds: number[],
   tag: string,
 ): Promise<number[]> {
+  // Get all open bugs under features (no assigned-to filter)
   const idList = featureIds.join(',');
-  const wiql = `SELECT [System.Id] FROM WorkItemLinks WHERE [Source].[System.Id] IN (${idList}) AND [Target].[System.WorkItemType] IN ('Bug', 'User Story') AND [Target].[System.State] NOT IN ('Resolved', 'Closed', 'Removed') AND [Target].[System.Tags] CONTAINS '${tag}' MODE (MustContain)`;
+  const wiql = `SELECT [System.Id] FROM WorkItemLinks WHERE [Source].[System.Id] IN (${idList}) AND [Target].[System.WorkItemType] IN ('Bug', 'User Story') AND [Target].[System.State] NOT IN ('Resolved', 'Closed', 'Removed') MODE (MustContain)`;
 
   const path = 'wit/wiql?api-version=7.0';
   const data = await adoFetchWithRetry<WiqlResponse>(config, path, {
@@ -158,14 +163,37 @@ export async function queryTaggedBugsUnderFeatures(
   });
 
   const featureIdSet = new Set(featureIds);
-  const bugIds: number[] = [];
+  const allBugIds: number[] = [];
   for (const rel of data.workItemRelations ?? []) {
     if (rel.target?.id && !featureIdSet.has(rel.target.id)) {
-      bugIds.push(rel.target.id);
+      allBugIds.push(rel.target.id);
     }
   }
 
-  return [...new Set(bugIds)];
+  const uniqueIds = [...new Set(allBugIds)];
+  if (uniqueIds.length === 0) return [];
+
+  // Batch-fetch tags (System.Tags CONTAINS is unreliable in WorkItemLinks WIQL)
+  const tagLower = tag.toLowerCase();
+  const taggedIds: number[] = [];
+  const chunkSize = 200;
+
+  for (let i = 0; i < uniqueIds.length; i += chunkSize) {
+    const chunk = uniqueIds.slice(i, i + chunkSize);
+    const ids = chunk.join(',');
+    const tagsPath = `wit/workitems?ids=${ids}&fields=System.Tags&api-version=7.0`;
+    const tagsData = await adoFetchWithRetry<WorkItemsBatchResponse>(config, tagsPath);
+
+    for (const item of tagsData.value ?? []) {
+      const tags = String(item.fields['System.Tags'] ?? '');
+      const hasTag = tags.split(';').some((t) => t.trim().toLowerCase() === tagLower);
+      if (hasTag) {
+        taggedIds.push(item.id);
+      }
+    }
+  }
+
+  return taggedIds;
 }
 
 export async function removeTagFromWorkItem(
