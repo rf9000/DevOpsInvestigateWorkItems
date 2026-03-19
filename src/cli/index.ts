@@ -4,6 +4,7 @@ import { loadConfig } from '../config/index.ts';
 import { startWatcher, runPollCycle } from '../services/watcher.ts';
 import { StateStore } from '../state/state-store.ts';
 import { processBug } from '../services/processor.ts';
+import * as sdk from '../sdk/azure-devops-client.ts';
 
 const HELP = `
 Bug Investigation System
@@ -32,6 +33,7 @@ Environment variables:
   MAX_INVESTIGATIONS_PER_DAY  Daily investigation limit (default: 5)
   CLAUDE_MODEL                Claude model to use (default: claude-sonnet-4-6)
   PROMPT_PATH                 Path to prompt file (default: src/prompts/investigate-bug.md)
+  REINVESTIGATE_TAG           Tag that triggers reinvestigation (default: agent investigate)
   STATE_DIR                   State directory (default: .state)
 `.trim();
 
@@ -103,6 +105,86 @@ switch (command) {
     const stateStore = new StateStore(config.stateDir);
     stateStore.reset();
     console.log('State has been reset');
+    break;
+  }
+
+  case 'debug-tags': {
+    const config = loadConfig();
+    const stateStore = new StateStore(config.stateDir);
+    console.log(`=== Debug Tag Detection ===`);
+    console.log(`reinvestigateTag: "${config.reinvestigateTag}"`);
+    console.log(`featureIds: ${config.featureWorkItemIds.join(', ')}`);
+    console.log(`assignedToFilter: ${config.assignedToFilter.length ? config.assignedToFilter.join(', ') : '(none)'}`);
+    console.log();
+
+    // Step 1: Regular query (with assigned-to filter)
+    console.log(`--- Step 1: Regular WIQL query (with assigned-to filter) ---`);
+    const bugIds = await sdk.queryBugsUnderFeatures(config, config.featureWorkItemIds);
+    console.log(`Returned ${bugIds.length} work item IDs: ${bugIds.join(', ') || '(none)'}`);
+    const newBugIds = bugIds.filter((id) => !stateStore.isProcessed(id));
+    const processedBugIds = bugIds.filter((id) => stateStore.isProcessed(id));
+    console.log(`  New (unprocessed): ${newBugIds.join(', ') || '(none)'}`);
+    console.log(`  Already processed: ${processedBugIds.join(', ') || '(none)'}`);
+    console.log();
+
+    // Step 2: Tag query — WIQL without assigned-to filter
+    console.log(`--- Step 2: Tag WIQL query (no assigned-to filter) ---`);
+    const idList = config.featureWorkItemIds.join(',');
+    const wiql = `SELECT [System.Id] FROM WorkItemLinks WHERE [Source].[System.Id] IN (${idList}) AND [Target].[System.WorkItemType] IN ('Bug', 'User Story') AND [Target].[System.State] NOT IN ('Resolved', 'Closed', 'Removed') MODE (MustContain)`;
+    console.log(`WIQL: ${wiql}`);
+    const wiqlData = await sdk.adoFetchWithRetry<{ workItemRelations: Array<{ target?: { id: number } }> }>(
+      config, 'wit/wiql?api-version=7.0', { method: 'POST', body: JSON.stringify({ query: wiql }) },
+    );
+    const featureIdSet = new Set(config.featureWorkItemIds);
+    const allIds: number[] = [];
+    for (const rel of wiqlData.workItemRelations ?? []) {
+      if (rel.target?.id && !featureIdSet.has(rel.target.id)) {
+        allIds.push(rel.target.id);
+      }
+    }
+    const uniqueIds = [...new Set(allIds)];
+    console.log(`Returned ${uniqueIds.length} work item IDs: ${uniqueIds.join(', ') || '(none)'}`);
+    console.log();
+
+    // Step 3: Batch-fetch tags
+    if (uniqueIds.length > 0) {
+      console.log(`--- Step 3: Batch-fetch System.Tags ---`);
+      const ids = uniqueIds.join(',');
+      const tagsPath = `wit/workitems?ids=${ids}&fields=System.Tags&api-version=7.0`;
+      console.log(`GET ${tagsPath}`);
+      const tagsData = await sdk.adoFetchWithRetry<{ value: Array<{ id: number; fields: Record<string, unknown> }> }>(
+        config, tagsPath,
+      );
+      const tagLower = config.reinvestigateTag.toLowerCase();
+      console.log();
+      console.log(`Work item tags:`);
+      for (const item of tagsData.value ?? []) {
+        const rawTags = item.fields['System.Tags'];
+        const tagsStr = String(rawTags ?? '');
+        const parsedTags = tagsStr.split(';').map((t) => t.trim()).filter((t) => t.length > 0);
+        const hasTag = parsedTags.some((t) => t.toLowerCase() === tagLower);
+        const processed = stateStore.isProcessed(item.id);
+        console.log(`  #${item.id}: raw="${rawTags}" parsed=[${parsedTags.map(t => `"${t}"`).join(', ')}] hasTag=${hasTag} processed=${processed}`);
+      }
+      console.log();
+
+      // Step 4: What queryTaggedBugsUnderFeatures would return
+      console.log(`--- Step 4: queryTaggedBugsUnderFeatures result ---`);
+      const taggedIds = await sdk.queryTaggedBugsUnderFeatures(config, config.featureWorkItemIds, config.reinvestigateTag);
+      console.log(`Tagged IDs: ${taggedIds.join(', ') || '(none)'}`);
+      console.log();
+
+      // Step 5: What toInvestigate would be
+      const toInvestigate = [...new Set([...newBugIds, ...taggedIds])];
+      const taggedSet = new Set(taggedIds);
+      console.log(`--- Step 5: Merge result ---`);
+      console.log(`toInvestigate: ${toInvestigate.join(', ') || '(none)'}`);
+      for (const id of toInvestigate) {
+        console.log(`  #${id}: new=${newBugIds.includes(id)} tagged=${taggedSet.has(id)} → willRemoveTag=${taggedSet.has(id)}`);
+      }
+    } else {
+      console.log(`No work items found under features — nothing to check.`);
+    }
     break;
   }
 

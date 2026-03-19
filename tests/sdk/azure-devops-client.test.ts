@@ -443,10 +443,12 @@ describe('removeTagFromWorkItem', () => {
 
     expect(mockFn).toHaveBeenCalledTimes(2);
 
-    // Verify the PATCH call has the correct tags (without "agent investigate")
+    // Verify the PATCH call uses "replace" (not "add" which merges tags)
     const patchCall = mockFn.mock.calls[1]!;
     const init = patchCall[1] as RequestInit;
     const body = JSON.parse(init.body as string) as Array<{ op: string; path: string; value: string }>;
+    expect(body[0]!.op).toBe('replace');
+    expect(body[0]!.path).toBe('/fields/System.Tags');
     expect(body[0]!.value).toBe('priority; urgent');
   });
 

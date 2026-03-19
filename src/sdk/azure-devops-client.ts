@@ -208,7 +208,13 @@ export async function removeTagFromWorkItem(
     .map((t) => t.trim())
     .filter((t) => t.length > 0 && t.toLowerCase() !== tagToRemove.toLowerCase());
   const newTags = tags.join('; ');
-  await updateWorkItemField(config, workItemId, 'System.Tags', newTags);
+  // Must use "replace" — "add" on System.Tags merges instead of overwriting
+  const path = `wit/workitems/${workItemId}?api-version=7.0`;
+  await adoFetchWithRetry<WorkItemResponse>(config, path, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json-patch+json' },
+    body: JSON.stringify([{ op: 'replace', path: '/fields/System.Tags', value: newTags }]),
+  });
 }
 
 export interface AttachmentDownload {
