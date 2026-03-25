@@ -8,6 +8,7 @@ import {
   updateWorkItemField,
   queryBugsUnderFeatures,
   queryTaggedBugsUnderFeatures,
+  queryTaggedWorkItems,
   removeTagFromWorkItem,
   addWorkItemComment,
   downloadAttachment,
@@ -413,6 +414,86 @@ describe('queryTaggedBugsUnderFeatures', () => {
 
     const result = await queryTaggedBugsUnderFeatures(config, [12345], 'agent investigate');
     expect(result).toEqual([100]);
+  });
+});
+
+describe('queryTaggedWorkItems', () => {
+  test('uses flat WIQL query with CONTAINS, then batch-fetches for exact match', async () => {
+    const wiqlResponse = {
+      workItems: [
+        { id: 100 },
+        { id: 200 },
+        { id: 300 },
+      ],
+    };
+    const batchResponse = {
+      value: [
+        { id: 100, fields: { 'System.Tags': 'agent investigate; priority' } },
+        { id: 200, fields: { 'System.Tags': 'other-tag' } },
+        { id: 300, fields: { 'System.Tags': 'Agent Investigate' } },
+      ],
+    };
+    setSequentialMockFetch(
+      { body: wiqlResponse },
+      { body: batchResponse },
+    );
+    const config = mockConfig();
+
+    const result = await queryTaggedWorkItems(config, 'agent investigate');
+
+    expect(result).toEqual([100, 300]);
+
+    // Verify flat WIQL (not WorkItemLinks)
+    const wiqlCall = mockFn.mock.calls[0]!;
+    const wiqlInit = wiqlCall[1] as RequestInit;
+    const body = JSON.parse(wiqlInit.body as string) as { query: string };
+    expect(body.query).toContain('FROM WorkItems');
+    expect(body.query).not.toContain('WorkItemLinks');
+    expect(body.query).toContain("CONTAINS 'agent investigate'");
+  });
+
+  test('returns empty array when no items match CONTAINS', async () => {
+    setMockFetch({ workItems: [] });
+    const config = mockConfig();
+
+    const result = await queryTaggedWorkItems(config, 'agent investigate');
+    expect(result).toEqual([]);
+
+    // Only one call (WIQL), no batch fetch needed
+    expect(mockFn).toHaveBeenCalledTimes(1);
+  });
+
+  test('filters out substring matches via exact tag check', async () => {
+    const wiqlResponse = {
+      workItems: [{ id: 100 }],
+    };
+    const batchResponse = {
+      value: [
+        { id: 100, fields: { 'System.Tags': 'do not agent investigate this' } },
+      ],
+    };
+    setSequentialMockFetch(
+      { body: wiqlResponse },
+      { body: batchResponse },
+    );
+    const config = mockConfig();
+
+    const result = await queryTaggedWorkItems(config, 'agent investigate');
+    expect(result).toEqual([]);
+  });
+
+  test('is not scoped to any feature IDs', async () => {
+    setMockFetch({ workItems: [] });
+    const config = mockConfig();
+
+    await queryTaggedWorkItems(config, 'agent investigate');
+
+    const wiqlCall = mockFn.mock.calls[0]!;
+    const wiqlInit = wiqlCall[1] as RequestInit;
+    const body = JSON.parse(wiqlInit.body as string) as { query: string };
+    // Should NOT reference Source or feature IDs
+    expect(body.query).not.toContain('[Source]');
+    expect(body.query).not.toContain('12345');
   });
 });
 

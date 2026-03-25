@@ -303,6 +303,49 @@ interface CommentResponse {
   text: string;
 }
 
+interface WiqlFlatResponse {
+  workItems: Array<{ id: number }>;
+}
+
+export async function queryTaggedWorkItems(
+  config: AppConfig,
+  tag: string,
+): Promise<number[]> {
+  // Flat WIQL query across the entire project — not scoped to parent features
+  const wiql = `SELECT [System.Id] FROM WorkItems WHERE [System.WorkItemType] IN ('Bug', 'User Story') AND [System.State] NOT IN ('Resolved', 'Closed', 'Removed') AND [System.Tags] CONTAINS '${tag}'`;
+
+  const path = 'wit/wiql?api-version=7.0';
+  const data = await adoFetchWithRetry<WiqlFlatResponse>(config, path, {
+    method: 'POST',
+    body: JSON.stringify({ query: wiql }),
+  });
+
+  const candidateIds = (data.workItems ?? []).map((wi) => wi.id);
+  if (candidateIds.length === 0) return [];
+
+  // Batch-fetch for exact tag matching (CONTAINS is substring-based)
+  const tagLower = tag.toLowerCase();
+  const taggedIds: number[] = [];
+  const chunkSize = 200;
+
+  for (let i = 0; i < candidateIds.length; i += chunkSize) {
+    const chunk = candidateIds.slice(i, i + chunkSize);
+    const ids = chunk.join(',');
+    const tagsPath = `wit/workitems?ids=${ids}&fields=System.Tags&api-version=7.0`;
+    const tagsData = await adoFetchWithRetry<WorkItemsBatchResponse>(config, tagsPath);
+
+    for (const item of tagsData.value ?? []) {
+      const tags = String(item.fields['System.Tags'] ?? '');
+      const hasTag = tags.split(';').some((t) => t.trim().toLowerCase() === tagLower);
+      if (hasTag) {
+        taggedIds.push(item.id);
+      }
+    }
+  }
+
+  return taggedIds;
+}
+
 export async function addWorkItemComment(
   config: AppConfig,
   workItemId: number,

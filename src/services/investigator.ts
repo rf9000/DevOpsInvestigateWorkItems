@@ -108,14 +108,16 @@ export async function investigateBug(
   }
 
   let result: string | undefined;
+  let resultSubtype: string | undefined;
   const assistantTexts: string[] = [];
+  let turnCount = 0;
 
   for await (const message of query({
     prompt,
     options: {
       model: config.claudeModel,
-      maxTurns: 25,
-      tools: ['Read', 'Grep', 'Glob', 'Bash', 'Skill', 'Agent', 'LSP'],
+      maxTurns: 40,
+      tools: ['Read', 'Grep', 'Glob', 'Bash', 'Skill', 'LSP'],
       disallowedTools: ['Edit', 'Write', 'NotebookEdit'],
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
@@ -130,18 +132,36 @@ export async function investigateBug(
     },
   })) {
     if (message.type === 'assistant') {
+      turnCount++;
       const text = extractAssistantText(message);
       if (text.trim()) {
         assistantTexts.push(text);
       }
     }
-    if (message.type === 'result' && message.subtype === 'success') {
-      result = message.result;
+    if (message.type === 'result') {
+      resultSubtype = message.subtype;
+      if (message.subtype === 'success') {
+        result = message.result;
+      } else if (message.subtype === 'error_max_turns') {
+        console.error(`  Agent hit max turns (${turnCount}). Last assistant texts may contain a partial report.`);
+      } else {
+        console.error(`  Agent ended with result subtype: ${message.subtype}`);
+      }
     }
   }
 
+  // If no success result, try to salvage a report from assistant messages
   if (result === undefined) {
-    throw new Error('No investigation result received from Claude Agent SDK');
+    for (let i = assistantTexts.length - 1; i >= 0; i--) {
+      const candidate = assistantTexts[i]!;
+      if (looksLikeReport(candidate)) {
+        console.error(`  No success result (subtype=${resultSubtype ?? 'none'}, turns=${turnCount}), but found report in assistant message ${i + 1}/${assistantTexts.length}`);
+        return candidate.trim();
+      }
+    }
+    throw new Error(
+      `No investigation result received from Claude Agent SDK (subtype=${resultSubtype ?? 'none'}, turns=${turnCount}, assistantMessages=${assistantTexts.length})`,
+    );
   }
 
   // If the final result doesn't look like a report, search earlier assistant

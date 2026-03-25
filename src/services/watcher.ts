@@ -12,9 +12,8 @@ export interface WatcherDeps {
     featureIds: number[],
   ) => Promise<number[]>;
 
-  queryTaggedBugsUnderFeatures: (
+  queryTaggedWorkItems: (
     config: AppConfig,
-    featureIds: number[],
     tag: string,
   ) => Promise<number[]>;
 
@@ -32,7 +31,7 @@ export interface WatcherDeps {
 
 const defaultDeps: WatcherDeps = {
   queryBugsUnderFeatures: sdk.queryBugsUnderFeatures,
-  queryTaggedBugsUnderFeatures: sdk.queryTaggedBugsUnderFeatures,
+  queryTaggedWorkItems: sdk.queryTaggedWorkItems,
   processBug: proc.processBug,
   removeTagFromWorkItem: sdk.removeTagFromWorkItem,
 };
@@ -65,11 +64,11 @@ export async function runPollCycle(
   const bugIds = await deps.queryBugsUnderFeatures(config, config.featureWorkItemIds);
   const newBugIds = bugIds.filter((id) => !stateStore.isProcessed(id));
 
-  // 3. Query for tagged items (bypasses assigned-to filter and processed state)
+  // 3. Query for tagged items project-wide (not scoped to features)
   let taggedBugIds: number[] = [];
   if (config.reinvestigateTag) {
-    taggedBugIds = await deps.queryTaggedBugsUnderFeatures(
-      config, config.featureWorkItemIds, config.reinvestigateTag,
+    taggedBugIds = await deps.queryTaggedWorkItems(
+      config, config.reinvestigateTag,
     );
   }
   const taggedSet = new Set(taggedBugIds);
@@ -109,6 +108,7 @@ export async function runPollCycle(
           }
         }
       } else {
+        log(`Bug #${bugId}: Investigation failed — ${result.error ?? 'unknown reason'}`);
         errors++;
       }
     } catch (err) {

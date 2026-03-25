@@ -30,7 +30,7 @@ function mockConfig(overrides: Partial<AppConfig> = {}): AppConfig {
 function makeDeps(overrides: Partial<WatcherDeps> = {}): WatcherDeps {
   return {
     queryBugsUnderFeatures: mock(() => Promise.resolve([])),
-    queryTaggedBugsUnderFeatures: mock(() => Promise.resolve([])),
+    queryTaggedWorkItems: mock(() => Promise.resolve([])),
     processBug: mock(() =>
       Promise.resolve({ bugId: 0, investigated: true }),
     ),
@@ -184,7 +184,7 @@ describe('runPollCycle', () => {
 
     const deps = makeDeps({
       queryBugsUnderFeatures: mock(() => Promise.resolve([200])),
-      queryTaggedBugsUnderFeatures: mock(() => Promise.resolve([200])),
+      queryTaggedWorkItems: mock(() => Promise.resolve([200])),
       processBug: mock(() =>
         Promise.resolve({ bugId: 200, investigated: true }),
       ),
@@ -205,7 +205,7 @@ describe('runPollCycle', () => {
     const removeTagMock = mock(() => Promise.resolve());
     const deps = makeDeps({
       queryBugsUnderFeatures: mock(() => Promise.resolve([200])),
-      queryTaggedBugsUnderFeatures: mock(() => Promise.resolve([200])),
+      queryTaggedWorkItems: mock(() => Promise.resolve([200])),
       processBug: mock(() =>
         Promise.resolve({ bugId: 200, investigated: true }),
       ),
@@ -227,7 +227,7 @@ describe('runPollCycle', () => {
     const removeTagMock = mock(() => Promise.resolve());
     const deps = makeDeps({
       queryBugsUnderFeatures: mock(() => Promise.resolve([200])),
-      queryTaggedBugsUnderFeatures: mock(() => Promise.resolve([200])),
+      queryTaggedWorkItems: mock(() => Promise.resolve([200])),
       processBug: mock(() =>
         Promise.resolve({ bugId: 200, investigated: false, error: 'AI failed' }),
       ),
@@ -247,7 +247,7 @@ describe('runPollCycle', () => {
 
     const deps = makeDeps({
       queryBugsUnderFeatures: mock(() => Promise.resolve([200])),
-      queryTaggedBugsUnderFeatures: mock(() => Promise.resolve([200])),
+      queryTaggedWorkItems: mock(() => Promise.resolve([200])),
       processBug: mock(() =>
         Promise.resolve({ bugId: 200, investigated: true }),
       ),
@@ -266,7 +266,7 @@ describe('runPollCycle', () => {
 
     const deps = makeDeps({
       queryBugsUnderFeatures: mock(() => Promise.resolve([100, 200])),
-      queryTaggedBugsUnderFeatures: mock(() => Promise.resolve([200])),
+      queryTaggedWorkItems: mock(() => Promise.resolve([200])),
       processBug: mock((cfg: AppConfig, bugId: number) =>
         Promise.resolve({ bugId, investigated: true }),
       ),
@@ -283,10 +283,10 @@ describe('runPollCycle', () => {
     const config = mockConfig({ assignedToFilter: ['Alice Smith'] });
 
     // Regular query (filtered by assigned-to) returns nothing
-    // Tag query (no assigned-to filter) finds item 300
+    // Tag query (project-wide, no feature/assigned-to filter) finds item 300
     const deps = makeDeps({
       queryBugsUnderFeatures: mock(() => Promise.resolve([])),
-      queryTaggedBugsUnderFeatures: mock(() => Promise.resolve([300])),
+      queryTaggedWorkItems: mock(() => Promise.resolve([300])),
       processBug: mock(() =>
         Promise.resolve({ bugId: 300, investigated: true }),
       ),
@@ -296,6 +296,25 @@ describe('runPollCycle', () => {
 
     expect(result.investigated).toBe(1);
     expect(deps.processBug).toHaveBeenCalledTimes(1);
+  });
+
+  test('tagged items from outside configured features are investigated', async () => {
+    const config = mockConfig({ featureWorkItemIds: [12345] });
+
+    // Regular query only finds items under feature 12345
+    // Tag query finds item 999 which is under a different feature
+    const deps = makeDeps({
+      queryBugsUnderFeatures: mock(() => Promise.resolve([100])),
+      queryTaggedWorkItems: mock(() => Promise.resolve([999])),
+      processBug: mock((cfg: AppConfig, bugId: number) =>
+        Promise.resolve({ bugId, investigated: true }),
+      ),
+    });
+
+    const result = await runPollCycle(config, stateStore, deps);
+
+    expect(result.investigated).toBe(2);
+    expect(deps.processBug).toHaveBeenCalledTimes(2);
   });
 
   test('prunes processed IDs not returned by current query', async () => {

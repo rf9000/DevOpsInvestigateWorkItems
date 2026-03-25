@@ -168,22 +168,30 @@ switch (command) {
       }
       console.log();
 
-      // Step 4: What queryTaggedBugsUnderFeatures would return
-      console.log(`--- Step 4: queryTaggedBugsUnderFeatures result ---`);
-      const taggedIds = await sdk.queryTaggedBugsUnderFeatures(config, config.featureWorkItemIds, config.reinvestigateTag);
-      console.log(`Tagged IDs: ${taggedIds.join(', ') || '(none)'}`);
+      // Step 4: What queryTaggedBugsUnderFeatures would return (legacy, feature-scoped)
+      console.log(`--- Step 4: queryTaggedBugsUnderFeatures result (feature-scoped) ---`);
+      const taggedUnderFeatures = await sdk.queryTaggedBugsUnderFeatures(config, config.featureWorkItemIds, config.reinvestigateTag);
+      console.log(`Tagged IDs (under features): ${taggedUnderFeatures.join(', ') || '(none)'}`);
       console.log();
+    } else {
+      console.log(`No work items found under features.`);
+    }
 
-      // Step 5: What toInvestigate would be
+    // Step 5: Project-wide tag query (what the watcher actually uses)
+    console.log(`--- Step 5: queryTaggedWorkItems result (project-wide) ---`);
+    const taggedIds = await sdk.queryTaggedWorkItems(config, config.reinvestigateTag);
+    console.log(`Tagged IDs (project-wide): ${taggedIds.join(', ') || '(none)'}`);
+    console.log();
+
+    {
+      // Step 6: What toInvestigate would be
       const toInvestigate = [...new Set([...newBugIds, ...taggedIds])];
       const taggedSet = new Set(taggedIds);
-      console.log(`--- Step 5: Merge result ---`);
+      console.log(`--- Step 6: Merge result ---`);
       console.log(`toInvestigate: ${toInvestigate.join(', ') || '(none)'}`);
       for (const id of toInvestigate) {
         console.log(`  #${id}: new=${newBugIds.includes(id)} tagged=${taggedSet.has(id)} → willRemoveTag=${taggedSet.has(id)}`);
       }
-    } else {
-      console.log(`No work items found under features — nothing to check.`);
     }
     break;
   }
