@@ -61,6 +61,39 @@ describe('processBug', () => {
     expect(deps.getWorkItem).toHaveBeenCalledTimes(1);
     expect(deps.investigateBug).toHaveBeenCalledTimes(1);
     expect(deps.addWorkItemComment).toHaveBeenCalledTimes(1);
+
+    const postedHtml = (deps.addWorkItemComment as ReturnType<typeof mock>).mock.calls[0]![2] as string;
+    expect(postedHtml).toContain('agent investigate');
+    expect(postedHtml).toContain('If you want the agent to investigate again');
+  });
+
+  test('strips preamble text before first ### header', async () => {
+    const config = mockConfig();
+    const deps = makeDeps({
+      investigateBug: mock(() =>
+        Promise.resolve(
+          'I now have the complete picture. Here is the full investigation report:\n\n### Bug Validity\nYes\n\n### Root Cause\nStale variable.',
+        ),
+      ),
+    });
+
+    await processBug(config, 100, deps);
+
+    const postedHtml = (deps.addWorkItemComment as ReturnType<typeof mock>).mock.calls[0]![2] as string;
+    expect(postedHtml).not.toContain('complete picture');
+    expect(postedHtml).toContain('Bug Validity');
+    expect(postedHtml).toContain('Root Cause');
+  });
+
+  test('appends reinvestigate tag footer to comment', async () => {
+    const config = { ...mockConfig(), reinvestigateTag: 'custom-tag' };
+    const deps = makeDeps();
+
+    await processBug(config, 100, deps);
+
+    const postedHtml = (deps.addWorkItemComment as ReturnType<typeof mock>).mock.calls[0]![2] as string;
+    expect(postedHtml).toContain('custom-tag');
+    expect(postedHtml).toContain('If you want the agent to investigate again');
   });
 
   test('investigation failure returns investigated=false with error', async () => {

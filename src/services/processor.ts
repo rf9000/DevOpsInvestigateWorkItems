@@ -123,12 +123,20 @@ export async function processBug(
       return { bugId, investigated: false, error: 'Investigation returned empty result' };
     }
 
+    // Strip any preamble before first ### header
+    const headerIndex = output.indexOf('### ');
+    const cleanedOutput = headerIndex > 0 ? output.slice(headerIndex) : output;
+
+    // Append reinvestigate tag footer
+    const footer = `\n\n---\n*If you want the agent to investigate again, tag the work item with: \`${config.reinvestigateTag}\`*`;
+    const finalOutput = cleanedOutput + footer;
+
     if (config.dryRun) {
-      log(`  Bug #${bugId}: [DRY RUN] Investigation result:\n${output}`);
+      log(`  Bug #${bugId}: [DRY RUN] Investigation result:\n${finalOutput}`);
       return { bugId, investigated: true };
     }
 
-    const commentHtml = await marked(output);
+    const commentHtml = await marked(finalOutput);
     await deps.addWorkItemComment(config, bugId, commentHtml);
     log(`  Bug #${bugId}: Investigation posted as comment`);
 
