@@ -37,9 +37,9 @@ if [ "$(id -u)" = "0" ]; then
       JSON="$JSON\"$name\":\"${dir%/}\""
     done
     JSON="$JSON}"
-    echo "$JSON" > /tmp/repo-paths.json
-    chown claude:claude /tmp/repo-paths.json
-    REPO_PATHS_FILE=/tmp/repo-paths.json
+    echo "$JSON" > /app/repo-paths.json
+    chown claude:claude /app/repo-paths.json
+    REPO_PATHS_FILE=/app/repo-paths.json
     echo "Generated repo-paths.json: $JSON"
   fi
 
