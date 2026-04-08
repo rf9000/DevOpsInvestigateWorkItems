@@ -154,13 +154,15 @@ The service runs on an Azure VM using Docker Compose. Target repos are cloned on
    source ~/.bashrc
    ```
 
-5. Authenticate Claude Code. The VM has no browser, so use an extended timeout to give yourself time to complete the OAuth flow:
+5. Authenticate Claude Code. The VM has no browser, so use the interactive REPL:
    ```bash
-   ANTHROPIC_AUTH_TIMEOUT=300000 claude auth login
+   claude
    ```
+   - Inside the REPL, type `/login`
    - Copy the URL it shows and open it in your local browser
    - Sign in and authorize
-   - Paste the code back into the VM terminal when prompted
+   - Paste the code back into the VM terminal
+   - Exit the REPL with `/exit`
 
 6. Configure `.env.investigate` with your Azure DevOps settings.
 
@@ -233,15 +235,24 @@ docker compose up -d
 
 If investigations start failing with "Claude Code process exited with code 1", the OAuth token may have expired. Re-authenticate on the VM host:
 
-```bash
-ANTHROPIC_AUTH_TIMEOUT=300000 claude auth login
-```
+1. The Docker container's `claude` user takes ownership of `~/.claude/` via the bind mount, so first reclaim it:
+   ```bash
+   sudo chown -R azureuser:azureuser ~/.claude/
+   ```
 
-Then restart the container:
+2. Launch Claude Code interactively and use `/login`:
+   ```bash
+   claude
+   ```
+   Inside the REPL, type `/login`, open the URL in your local browser, authorize, and paste the code back.
 
-```bash
-docker compose restart investigate-work-items
-```
+3. Exit the REPL (`/exit`) and restart the container:
+   ```bash
+   cd ~/teams/<team-name>
+   docker compose restart investigate-work-items
+   ```
+
+The entrypoint will `chown -R claude:claude /home/claude/.claude` inside the container on startup, so the credentials remain accessible to both host and container.
 
 ### Migrating from Single-Repo (/repo) to Multi-Repo (/repos/)
 
@@ -296,10 +307,10 @@ This is a breaking change — all three steps must happen together:
 - The Claude Code install script requires `bash`, not `sh`. Use `curl -fsSL https://claude.ai/install.sh | bash`.
 - After install, `~/.local/bin` must be added to `PATH`.
 
-**OAuth login times out on the VM**
-- Use `ANTHROPIC_AUTH_TIMEOUT=300000 claude auth login` to extend the timeout to 5 minutes.
+**OAuth login doesn't accept input or times out on the VM**
+- Use the interactive REPL instead of `claude auth login`: run `claude`, then type `/login` inside the REPL.
+- If `~/.claude/` is owned by uid 1001 (the container's `claude` user), run `sudo chown -R azureuser:azureuser ~/.claude/` first.
 - Open the auth URL on your local PC's browser, authorize, and paste the code back into the VM terminal.
-- The default 15-second timeout is too short for manual copy-paste flow on headless VMs.
 
 ### Architecture Notes
 
