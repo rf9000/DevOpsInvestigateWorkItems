@@ -139,7 +139,8 @@ export async function investigateBug(
       }
     }
     if (message.type === 'result') {
-      console.log(`  Cost: $${message.total_cost_usd.toFixed(4)} | ${message.usage.input_tokens ?? 0} in / ${message.usage.output_tokens ?? 0} out | ${message.num_turns} turns`);
+      const models = Object.keys(message.modelUsage).join(', ') || 'unknown';
+      console.log(`  Cost: $${message.total_cost_usd.toFixed(4)} | ${message.usage.input_tokens ?? 0} in / ${message.usage.output_tokens ?? 0} out | ${message.num_turns} turns | ${models}`);
       resultSubtype = message.subtype;
       if (message.subtype === 'success') {
         result = message.result;
