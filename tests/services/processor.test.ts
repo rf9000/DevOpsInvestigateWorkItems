@@ -39,7 +39,7 @@ function makeDeps(overrides: Partial<ProcessorDeps> = {}): ProcessorDeps {
         url: 'https://example.com/100',
       }),
     ),
-    investigateBug: mock(() => Promise.resolve('### Bug Validity\nYes\n\n### Root Cause\nToken validation missing.')),
+    runInvestigation: mock(() => Promise.resolve('### Bug Validity\nYes\n\n### Root Cause\nToken validation missing.')),
     addWorkItemComment: mock(() => Promise.resolve({ id: 1, text: 'comment' })),
     discoverTargetRepoSkills: mock(() => []),
     downloadAttachment: mock(() =>
@@ -61,7 +61,7 @@ describe('processBug', () => {
 
     expect(result).toEqual({ bugId: 100, investigated: true });
     expect(deps.getWorkItem).toHaveBeenCalledTimes(1);
-    expect(deps.investigateBug).toHaveBeenCalledTimes(1);
+    expect(deps.runInvestigation).toHaveBeenCalledTimes(1);
     expect(deps.addWorkItemComment).toHaveBeenCalledTimes(1);
 
     const postedHtml = (deps.addWorkItemComment as ReturnType<typeof mock>).mock.calls[0]![2] as string;
@@ -72,7 +72,7 @@ describe('processBug', () => {
   test('strips preamble text before first ### header', async () => {
     const config = mockConfig();
     const deps = makeDeps({
-      investigateBug: mock(() =>
+      runInvestigation: mock(() =>
         Promise.resolve(
           'I now have the complete picture. Here is the full investigation report:\n\n### Bug Validity\nYes\n\n### Root Cause\nStale variable.',
         ),
@@ -101,7 +101,7 @@ describe('processBug', () => {
   test('investigation failure returns investigated=false with error', async () => {
     const config = mockConfig();
     const deps = makeDeps({
-      investigateBug: mock(() =>
+      runInvestigation: mock(() =>
         Promise.reject(new Error('Claude API error')),
       ),
     });
@@ -127,7 +127,7 @@ describe('processBug', () => {
     expect(result.bugId).toBe(999);
     expect(result.investigated).toBe(false);
     expect(result.error).toContain('Work item not found');
-    expect(deps.investigateBug).toHaveBeenCalledTimes(0);
+    expect(deps.runInvestigation).toHaveBeenCalledTimes(0);
   });
 
   test('dry run investigates but does not post comment', async () => {
@@ -137,21 +137,21 @@ describe('processBug', () => {
     const result = await processBug(config, 100, deps);
 
     expect(result).toEqual({ bugId: 100, investigated: true });
-    expect(deps.investigateBug).toHaveBeenCalledTimes(1);
+    expect(deps.runInvestigation).toHaveBeenCalledTimes(1);
     expect(deps.addWorkItemComment).toHaveBeenCalledTimes(0);
   });
 
   test('passes correct context to investigateBug', async () => {
     const config = mockConfig();
-    const investigateMock = mock((_cfg: AppConfig, _ctx: unknown) => Promise.resolve('result'));
+    const investigateMock = mock((_cfg: AppConfig, _bugId: number, _ctx: unknown) => Promise.resolve('result'));
     const deps = makeDeps({
-      investigateBug: investigateMock,
+      runInvestigation: investigateMock,
     });
 
     await processBug(config, 100, deps);
 
     expect(investigateMock).toHaveBeenCalledTimes(1);
-    const context = investigateMock.mock.calls[0]![1] as {
+    const context = investigateMock.mock.calls[0]![2] as {
       bugTitle: string;
       bugDescription: string;
       bugReproSteps: string;
@@ -163,7 +163,7 @@ describe('processBug', () => {
 
   test('extracts images from HTML and passes them in context', async () => {
     const config = mockConfig();
-    const investigateMock = mock((_cfg: AppConfig, _ctx: unknown) => Promise.resolve('result'));
+    const investigateMock = mock((_cfg: AppConfig, _bugId: number, _ctx: unknown) => Promise.resolve('result'));
     const downloadMock = mock(() =>
       Promise.resolve({
         data: Buffer.from([0x89, 0x50, 0x4e, 0x47]),
@@ -184,14 +184,14 @@ describe('processBug', () => {
           url: 'https://example.com/100',
         }),
       ),
-      investigateBug: investigateMock,
+      runInvestigation: investigateMock,
       downloadAttachment: downloadMock,
     });
 
     await processBug(config, 100, deps);
 
     expect(downloadMock).toHaveBeenCalledTimes(1);
-    const context = investigateMock.mock.calls[0]![1] as InvestigationContext;
+    const context = investigateMock.mock.calls[0]![2] as InvestigationContext;
     expect(context.images).toHaveLength(1);
     expect(context.images[0]!.mediaType).toBe('image/png');
     expect(context.images[0]!.alt).toBe('error');
@@ -202,7 +202,7 @@ describe('processBug', () => {
 
   test('strips HTML from description and repro steps', async () => {
     const config = mockConfig();
-    const investigateMock = mock((_cfg: AppConfig, _ctx: unknown) => Promise.resolve('result'));
+    const investigateMock = mock((_cfg: AppConfig, _bugId: number, _ctx: unknown) => Promise.resolve('result'));
     const deps = makeDeps({
       getWorkItem: mock(() =>
         Promise.resolve({
@@ -216,12 +216,12 @@ describe('processBug', () => {
           url: 'https://example.com/100',
         }),
       ),
-      investigateBug: investigateMock,
+      runInvestigation: investigateMock,
     });
 
     await processBug(config, 100, deps);
 
-    const context = investigateMock.mock.calls[0]![1] as InvestigationContext;
+    const context = investigateMock.mock.calls[0]![2] as InvestigationContext;
     expect(context.bugDescription).not.toContain('<p>');
     expect(context.bugDescription).not.toContain('<strong>');
     expect(context.bugDescription).toContain('login');
@@ -231,7 +231,7 @@ describe('processBug', () => {
 
   test('continues investigation when image download fails', async () => {
     const config = mockConfig();
-    const investigateMock = mock((_cfg: AppConfig, _ctx: unknown) => Promise.resolve('result'));
+    const investigateMock = mock((_cfg: AppConfig, _bugId: number, _ctx: unknown) => Promise.resolve('result'));
     const deps = makeDeps({
       getWorkItem: mock(() =>
         Promise.resolve({
@@ -246,14 +246,14 @@ describe('processBug', () => {
           url: 'https://example.com/100',
         }),
       ),
-      investigateBug: investigateMock,
+      runInvestigation: investigateMock,
       downloadAttachment: mock(() => Promise.reject(new Error('404 Not Found'))),
     });
 
     const result = await processBug(config, 100, deps);
 
     expect(result.investigated).toBe(true);
-    const context = investigateMock.mock.calls[0]![1] as InvestigationContext;
+    const context = investigateMock.mock.calls[0]![2] as InvestigationContext;
     expect(context.images).toHaveLength(0);
   });
 
@@ -262,29 +262,29 @@ describe('processBug', () => {
     const discovered = [
       { name: 'online-investigate', description: 'Investigates online.', skillDir: 'C:/fake/path' },
     ];
-    const investigateMock = mock((_cfg: AppConfig, _ctx: unknown) => Promise.resolve('result'));
+    const investigateMock = mock((_cfg: AppConfig, _bugId: number, _ctx: unknown) => Promise.resolve('result'));
     const deps = makeDeps({
       discoverTargetRepoSkills: mock(() => discovered),
-      investigateBug: investigateMock,
+      runInvestigation: investigateMock,
     });
 
     await processBug(config, 100, deps);
 
     expect(investigateMock).toHaveBeenCalledTimes(1);
-    const context = investigateMock.mock.calls[0]![1] as InvestigationContext;
+    const context = investigateMock.mock.calls[0]![2] as InvestigationContext;
     expect(context.discoveredSkills).toEqual(discovered);
   });
 
   test('passes empty images array when no images in HTML', async () => {
     const config = mockConfig();
-    const investigateMock = mock((_cfg: AppConfig, _ctx: unknown) => Promise.resolve('result'));
+    const investigateMock = mock((_cfg: AppConfig, _bugId: number, _ctx: unknown) => Promise.resolve('result'));
     const deps = makeDeps({
-      investigateBug: investigateMock,
+      runInvestigation: investigateMock,
     });
 
     await processBug(config, 100, deps);
 
-    const context = investigateMock.mock.calls[0]![1] as InvestigationContext;
+    const context = investigateMock.mock.calls[0]![2] as InvestigationContext;
     expect(context.images).toEqual([]);
   });
 });

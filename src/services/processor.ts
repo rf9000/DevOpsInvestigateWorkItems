@@ -10,7 +10,7 @@ import type { DiscoveredSkill } from './skill-loader.ts';
 
 import { marked } from 'marked';
 import * as sdk from '../sdk/azure-devops-client.ts';
-import * as inv from './investigator.ts';
+import * as orchestrator from './investigation-orchestrator.ts';
 import * as sl from './skill-loader.ts';
 import { extractImageUrls, stripHtmlToText } from '../utils/html.ts';
 
@@ -20,8 +20,9 @@ export interface ProcessorDeps {
     workItemId: number,
   ) => Promise<WorkItemResponse>;
 
-  investigateBug: (
+  runInvestigation: (
     config: AppConfig,
+    bugId: number,
     context: InvestigationContext,
   ) => Promise<string>;
 
@@ -41,7 +42,7 @@ export interface ProcessorDeps {
 
 const defaultDeps: ProcessorDeps = {
   getWorkItem: sdk.getWorkItem,
-  investigateBug: inv.investigateBug,
+  runInvestigation: orchestrator.runInvestigation,
   addWorkItemComment: sdk.addWorkItemComment,
   discoverTargetRepoSkills: sl.discoverTargetRepoSkills,
   downloadAttachment: sdk.downloadAttachment,
@@ -116,7 +117,7 @@ export async function processBug(
     };
 
     log(`  Bug #${bugId}: Starting investigation...`);
-    const output = await deps.investigateBug(config, context);
+    const output = await deps.runInvestigation(config, bugId, context);
 
     if (!output || !output.trim()) {
       log(`  Bug #${bugId}: Investigation returned empty result — skipping comment`);
