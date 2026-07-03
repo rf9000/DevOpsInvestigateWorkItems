@@ -30,6 +30,8 @@ function mockConfig(): AppConfig {
     reinvestigateTag: 'agent investigate',
     pollIntervalMinutes: 5,
     claudeModel: 'claude-sonnet-4-6',
+    claudeJudgeModel: 'claude-haiku-4-5',
+    claudeTiebreakModel: 'claude-opus-4-8',
     promptPath: './prompt.md',
     stateDir: '.state',
     dryRun: false,

@@ -9,6 +9,8 @@ export interface AppConfig {
   maxInvestigationsPerDay: number;
   pollIntervalMinutes: number;
   claudeModel: string;
+  claudeJudgeModel: string;
+  claudeTiebreakModel: string;
   promptPath: string;
   assignedToFilter: string[];
   reinvestigateTag: string;

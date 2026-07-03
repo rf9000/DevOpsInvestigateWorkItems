@@ -56,11 +56,32 @@ describe("loadConfig", () => {
 
     expect(config.pollIntervalMinutes).toBe(15);
     expect(config.maxInvestigationsPerDay).toBe(5);
-    expect(config.claudeModel).toBe("claude-sonnet-4-6");
+    expect(config.claudeModel).toBe("claude-sonnet-5");
     expect(config.promptPath).toBe("src/prompts/investigate-bug.md");
     expect(config.assignedToFilter).toEqual([]);
     expect(config.reinvestigateTag).toBe("agent investigate");
     expect(config.stateDir).toBe(".state");
+  });
+
+  it("defaults CLAUDE_JUDGE_MODEL to claude-haiku-4-5", () => {
+    const config = loadConfig(validEnv);
+    expect(config.claudeJudgeModel).toBe("claude-haiku-4-5");
+  });
+
+  it("defaults CLAUDE_TIEBREAK_MODEL to claude-opus-4-8", () => {
+    const config = loadConfig(validEnv);
+    expect(config.claudeTiebreakModel).toBe("claude-opus-4-8");
+  });
+
+  it("overrides CLAUDE_JUDGE_MODEL and CLAUDE_TIEBREAK_MODEL when set", () => {
+    const env = {
+      ...validEnv,
+      CLAUDE_JUDGE_MODEL: "claude-haiku-3-5",
+      CLAUDE_TIEBREAK_MODEL: "claude-opus-4-7",
+    };
+    const config = loadConfig(env);
+    expect(config.claudeJudgeModel).toBe("claude-haiku-3-5");
+    expect(config.claudeTiebreakModel).toBe("claude-opus-4-7");
   });
 
   it("overrides defaults when optional vars are provided", () => {
