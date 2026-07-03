@@ -603,7 +603,10 @@ describe('runInvestigation', () => {
     expect(investigateBug).toHaveBeenCalledTimes(3);
     expect(investigateBug.mock.calls[2]![2]).toBe('claude-opus-4-8');
     expect(judgeVerdicts).toHaveBeenCalledTimes(3);
-    expect(result).toBe('report from claude-opus-4-8');
+    // Tiebreak agreed with pass B, so pass B's own report is posted (per the
+    // design: "if Opus agrees with A or B, post that agreeing pass's report") —
+    // NOT the tiebreak's own report. Pass A/B both ran on config.claudeModel.
+    expect(result).toBe('report from claude-sonnet-5');
 
     const logEntry = appendValidationLog.mock.calls[0]![1] as { tieBreakUsed: boolean; finalPass: string };
     expect(logEntry.tieBreakUsed).toBe(true);
