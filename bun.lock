@@ -6,11 +6,11 @@
       "name": "devops-pull-template",
       "dependencies": {
         "@anthropic-ai/claude-agent-sdk": "latest",
+        "@anthropic-ai/sdk": "^0.78.0",
         "marked": "^17.0.4",
         "zod": "latest",
       },
       "devDependencies": {
-        "@anthropic-ai/sdk": "^0.78.0",
         "@types/bun": "latest",
         "typescript": "latest",
       },
