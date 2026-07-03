@@ -129,4 +129,38 @@ describe('runInvestigation', () => {
     expect(investigateBug.mock.calls[0]![2]).toBe('claude-sonnet-5');
     expect(investigateBug.mock.calls[1]![2]).toBe('claude-sonnet-5');
   });
+
+  test('agreement: appendValidationLog throwing does not block returning the report', async () => {
+    const investigateBug = mock((_c: AppConfig, _ctx: InvestigationContext, model: string) =>
+      Promise.resolve(`report from ${model}`),
+    );
+    const extractVerdict = mock(() => Promise.resolve(verdict()));
+    const judgeVerdicts = mock((): Promise<JudgeResult> => Promise.resolve({ agree: true, reason: 'match' }));
+    const appendValidationLog = mock((..._args: unknown[]) => {
+      throw new Error('disk full');
+    });
+
+    const deps: OrchestratorDeps = { investigateBug, extractVerdict, judgeVerdicts, appendValidationLog };
+    const result = await runInvestigation(mockConfig(), 100, mockContext(), deps);
+
+    expect(result).toBe('report from claude-sonnet-5');
+    expect(appendValidationLog).toHaveBeenCalledTimes(1);
+  });
+
+  test('tiebreak: appendValidationLog throwing does not block returning the report', async () => {
+    const investigateBug = mock((_c: AppConfig, _ctx: InvestigationContext, model: string) =>
+      Promise.resolve(`report from ${model}`),
+    );
+    const extractVerdict = mock(() => Promise.resolve(verdict()));
+    const judgeVerdicts = mock((): Promise<JudgeResult> => Promise.resolve({ agree: false, reason: 'all differ' }));
+    const appendValidationLog = mock((..._args: unknown[]) => {
+      throw new Error('disk full');
+    });
+
+    const deps: OrchestratorDeps = { investigateBug, extractVerdict, judgeVerdicts, appendValidationLog };
+    const result = await runInvestigation(mockConfig(), 100, mockContext(), deps);
+
+    expect(result).toBe('report from claude-opus-4-8');
+    expect(appendValidationLog).toHaveBeenCalledTimes(1);
+  });
 });

@@ -35,6 +35,28 @@ const defaultDeps: OrchestratorDeps = {
   appendValidationLog: writeValidationLog,
 };
 
+function log(message: string): void {
+  const now = new Date(Date.now() + 60 * 60 * 1000);
+  const ts = now.toISOString().replace('T', ' ').slice(0, 19);
+  console.log(`[${ts}] ${message}`);
+}
+
+// The validation log is write-only (not yet consumed) and purely for future
+// analysis, so a failure here must never block a successful investigation
+// from being posted.
+function safeAppendValidationLog(
+  deps: OrchestratorDeps,
+  config: AppConfig,
+  entry: ValidationLogEntry,
+): void {
+  try {
+    deps.appendValidationLog(config, entry);
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    log(`  Bug #${entry.bugId}: Skipping validation log write — ${errMsg}`);
+  }
+}
+
 interface Pass {
   report: string;
   verdict: InvestigationVerdict;
@@ -65,7 +87,7 @@ export async function runInvestigation(
   const abJudgment = await deps.judgeVerdicts(passA.verdict, passB.verdict, config.claudeJudgeModel);
 
   if (abJudgment.agree) {
-    deps.appendValidationLog(config, {
+    safeAppendValidationLog(deps, config, {
       bugId,
       timestamp: new Date().toISOString(),
       verdictA: passA.verdict,
@@ -98,7 +120,7 @@ export async function runInvestigation(
     finalReport = tiebreak.report;
   }
 
-  deps.appendValidationLog(config, {
+  safeAppendValidationLog(deps, config, {
     bugId,
     timestamp: new Date().toISOString(),
     verdictA: passA.verdict,
