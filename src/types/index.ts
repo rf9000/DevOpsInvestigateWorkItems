@@ -45,14 +45,31 @@ export interface BugWorkItem {
   assignedTo: string;
 }
 
-/** Structured result from a bug investigation. */
-export interface InvestigationResult {
+/** Structured verdict extracted from one investigation pass's prose report. */
+export interface InvestigationVerdict {
+  isValid: 'yes' | 'no' | 'uncertain';
+  rootCauseSummary: string;
+  primaryCitation: { file: string; line?: number };
+  suggestedFixSummary: string;
+  confidence: 'high' | 'medium' | 'low';
+}
+
+/** Result of comparing two investigation verdicts. */
+export interface JudgeResult {
+  agree: boolean;
+  reason: string;
+}
+
+/** One line of the append-only validation outcome log. */
+export interface ValidationLogEntry {
   bugId: number;
-  isValid: boolean | 'uncertain';
-  rootCause: string;
-  reproduction: string;
-  fixSuggestion: string;
-  ambiguities: string[];
+  timestamp: string;
+  verdictA: InvestigationVerdict;
+  verdictB: InvestigationVerdict;
+  judgeResult: JudgeResult;
+  tieBreakUsed: boolean;
+  tieBreakVerdict?: InvestigationVerdict;
+  finalPass: 'A' | 'B' | 'tiebreak';
 }
 
 /** Result summary after processing a single bug. */
