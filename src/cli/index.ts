@@ -34,6 +34,7 @@ Environment variables:
   CLAUDE_MODEL                Claude model to use (default: claude-sonnet-5)
   CLAUDE_JUDGE_MODEL          Model used to compare the two investigation verdicts (default: claude-haiku-4-5)
   CLAUDE_TIEBREAK_MODEL       Model used for the tiebreak pass on disagreement (default: claude-opus-4-8)
+  CLAUDE_MAX_TURNS            Max agentic turns per investigation pass (default: 40)
   PROMPT_PATH                 Path to prompt file (default: src/prompts/investigate-bug.md)
   REINVESTIGATE_TAG           Tag that triggers reinvestigation (default: agent investigate)
   STATE_DIR                   State directory (default: .state)

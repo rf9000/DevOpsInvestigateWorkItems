@@ -11,6 +11,7 @@ export interface AppConfig {
   claudeModel: string;
   claudeJudgeModel: string;
   claudeTiebreakModel: string;
+  claudeMaxTurns: number;
   promptPath: string;
   assignedToFilter: string[];
   reinvestigateTag: string;

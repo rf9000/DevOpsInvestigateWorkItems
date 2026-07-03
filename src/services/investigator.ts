@@ -117,7 +117,7 @@ export async function investigateBug(
     prompt,
     options: {
       model,
-      maxTurns: 40,
+      maxTurns: config.claudeMaxTurns,
       tools: ['Read', 'Grep', 'Glob', 'Bash', 'Skill', 'LSP'],
       disallowedTools: ['Edit', 'Write', 'NotebookEdit'],
       permissionMode: 'bypassPermissions',

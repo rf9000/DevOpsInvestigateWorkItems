@@ -22,6 +22,7 @@ function mockConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     claudeModel: 'claude-sonnet-4-6',
     claudeJudgeModel: 'claude-haiku-4-5',
     claudeTiebreakModel: 'claude-opus-4-8',
+    claudeMaxTurns: 40,
     promptPath: './prompt.md',
     stateDir: '.state',
     dryRun: false,

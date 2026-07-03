@@ -84,6 +84,17 @@ describe("loadConfig", () => {
     expect(config.claudeTiebreakModel).toBe("claude-opus-4-7");
   });
 
+  it("defaults CLAUDE_MAX_TURNS to 40", () => {
+    const config = loadConfig(validEnv);
+    expect(config.claudeMaxTurns).toBe(40);
+  });
+
+  it("overrides CLAUDE_MAX_TURNS when set", () => {
+    const env = { ...validEnv, CLAUDE_MAX_TURNS: "80" };
+    const config = loadConfig(env);
+    expect(config.claudeMaxTurns).toBe(80);
+  });
+
   it("overrides defaults when optional vars are provided", () => {
     const env = {
       ...validEnv,
