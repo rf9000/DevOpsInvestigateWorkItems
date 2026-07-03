@@ -87,7 +87,10 @@ describe('runInvestigation', () => {
     expect(investigateBug).toHaveBeenCalledTimes(3);
     expect(investigateBug.mock.calls[2]![2]).toBe('claude-opus-4-8');
     expect(judgeVerdicts).toHaveBeenCalledTimes(3);
-    expect(result).toBe('report from claude-opus-4-8');
+    // Tiebreak agreed with pass B, so pass B's own report is posted (both
+    // passes run on config.claudeModel, which mockConfig() sets to
+    // 'claude-sonnet-5') — not the tiebreak's report.
+    expect(result).toBe('report from claude-sonnet-5');
 
     const logEntry = appendValidationLog.mock.calls[0]![1] as { tieBreakUsed: boolean; finalPass: string };
     expect(logEntry.tieBreakUsed).toBe(true);

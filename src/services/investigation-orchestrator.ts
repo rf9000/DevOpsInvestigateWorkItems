@@ -81,19 +81,22 @@ export async function runInvestigation(
   const aVsTiebreak = await deps.judgeVerdicts(passA.verdict, tiebreak.verdict, config.claudeJudgeModel);
   const bVsTiebreak = await deps.judgeVerdicts(passB.verdict, tiebreak.verdict, config.claudeJudgeModel);
 
-  // The tiebreak pass (Opus tier) always ran here, so its report is the one
-  // that gets returned/posted; `finalPass` records which side's verdict the
-  // tiebreak's own verdict matched (or 'tiebreak' on a true 3-way split), for
-  // the validation log only.
+  // The tiebreak resolves *which* of pass A or B was correct. If it agrees
+  // with one side, that side's own report is posted (its verdict was
+  // validated). Only a true 3-way split (tiebreak agrees with neither) falls
+  // back to posting the tiebreak's own report.
   let finalPass: 'A' | 'B' | 'tiebreak';
+  let finalReport: string;
   if (aVsTiebreak.agree) {
     finalPass = 'A';
+    finalReport = passA.report;
   } else if (bVsTiebreak.agree) {
     finalPass = 'B';
+    finalReport = passB.report;
   } else {
     finalPass = 'tiebreak';
+    finalReport = tiebreak.report;
   }
-  const finalReport = tiebreak.report;
 
   deps.appendValidationLog(config, {
     bugId,
