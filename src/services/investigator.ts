@@ -91,6 +91,7 @@ function extractAssistantText(message: { message: { content: unknown[] } }): str
 export async function investigateBug(
   config: AppConfig,
   context: InvestigationContext,
+  model: string,
 ): Promise<string> {
   const systemPrompt = buildSystemPrompt(config.promptPath, context.discoveredSkills);
 
@@ -115,7 +116,7 @@ export async function investigateBug(
   for await (const message of query({
     prompt,
     options: {
-      model: config.claudeModel,
+      model,
       maxTurns: 40,
       tools: ['Read', 'Grep', 'Glob', 'Bash', 'Skill', 'LSP'],
       disallowedTools: ['Edit', 'Write', 'NotebookEdit'],
