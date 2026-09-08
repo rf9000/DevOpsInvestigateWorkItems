@@ -85,7 +85,10 @@ The service runs as a Docker container on an Azure VM. Target repositories and t
 |----------|---------|-------------|
 | `POLL_INTERVAL_MINUTES` | 15 | Polling interval in minutes |
 | `MAX_INVESTIGATIONS_PER_DAY` | 5 | Daily investigation limit |
-| `CLAUDE_MODEL` | claude-sonnet-4-6 | Claude model to use |
+| `CLAUDE_MODEL` | claude-sonnet-5 | Claude model used for both investigation passes |
+| `CLAUDE_JUDGE_MODEL` | claude-haiku-4-5 | Model that compares the two investigation verdicts |
+| `CLAUDE_TIEBREAK_MODEL` | claude-opus-4-8 | Model used for the tiebreak pass when the two passes disagree |
+| `CLAUDE_MAX_TURNS` | 40 | Max agent turns per investigation pass |
 | `PROMPT_PATH` | .claude/commands/do-process-item.md | Path to the investigation prompt |
 | `SKILLS_DIR` | .claude/commands | Directory containing skill `.md` files loaded into the agent |
 | `ASSIGNED_TO_FILTER` | *(all)* | Comma-separated names to filter bugs by assignee |
@@ -293,7 +296,11 @@ This is a breaking change — all three steps must happen together:
 ### Troubleshooting
 
 **"Claude Code process exited with code 1" with no other details**
-- Most likely an expired OAuth token. Re-authenticate on the VM host (see above).
+- The error now includes the CLI's stderr tail when available — check that first.
+- If the cost line shows `$0.0000 | 0 in / 0 out | 1 turns | unknown`, the API rejected the first request. Known causes:
+  - Outdated `@anthropic-ai/claude-agent-sdk` used with a newer model (e.g. SDK < 0.3 sends `thinking.type: enabled`, which Claude 5 models reject with a 400). Fix: `bun update @anthropic-ai/claude-agent-sdk`.
+  - Expired OAuth token. Re-authenticate on the VM host (see above).
+- Running from inside another Claude Code session fails with "Claude Code cannot be launched inside another Claude Code session" — run from a plain terminal or unset `CLAUDECODE`.
 - Run `docker compose exec investigate-work-items claude -p "hello"` to test Claude Code directly.
 
 **"--dangerously-skip-permissions cannot be used with root/sudo privileges"**

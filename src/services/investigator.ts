@@ -1,6 +1,6 @@
 import { readFileSync } from 'fs';
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import type { PermissionResult, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { HookCallback, PermissionResult, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages/messages';
 import type { AppConfig, ImageAttachment } from '../types/index.ts';
 import type { DiscoveredSkill } from './skill-loader.ts';
@@ -42,6 +42,27 @@ export async function canUseTool(
   }
   return { behavior: 'allow' };
 }
+
+// With permissionMode 'bypassPermissions', the canUseTool callback is never
+// consulted (the SDK auto-approves first), so the deny-list must run as a
+// PreToolUse hook — hooks fire before the permission system.
+export const denyDestructiveBashHook: HookCallback = async (input) => {
+  if (input.hook_event_name !== 'PreToolUse') return {};
+  const decision = await canUseTool(
+    input.tool_name,
+    (input.tool_input ?? {}) as Record<string, unknown>,
+  );
+  if (decision.behavior === 'deny') {
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: decision.message,
+      },
+    };
+  }
+  return {};
+};
 
 export interface InvestigationContext {
   bugTitle: string;
@@ -112,45 +133,65 @@ export async function investigateBug(
   let resultSubtype: string | undefined;
   const assistantTexts: string[] = [];
   let turnCount = 0;
+  const stderrTail: string[] = [];
 
-  for await (const message of query({
-    prompt,
-    options: {
-      model,
-      maxTurns: config.claudeMaxTurns,
-      tools: ['Read', 'Grep', 'Glob', 'Bash', 'Skill', 'LSP'],
-      disallowedTools: ['Edit', 'Write', 'NotebookEdit'],
-      permissionMode: 'bypassPermissions',
-      allowDangerouslySkipPermissions: true,
-      canUseTool,
-      systemPrompt: {
-        type: 'preset',
-        preset: 'claude_code',
-        append: systemPrompt,
+  try {
+    for await (const message of query({
+      prompt,
+      options: {
+        model,
+        maxTurns: config.claudeMaxTurns,
+        tools: ['Read', 'Grep', 'Glob', 'Bash', 'Skill', 'LSP'],
+        disallowedTools: ['Edit', 'Write', 'NotebookEdit'],
+        permissionMode: 'bypassPermissions',
+        allowDangerouslySkipPermissions: true,
+        hooks: {
+          PreToolUse: [{ matcher: 'Bash', hooks: [denyDestructiveBashHook] }],
+        },
+        systemPrompt: {
+          type: 'preset',
+          preset: 'claude_code',
+          append: systemPrompt,
+        },
+        settingSources: ['project'],
+        cwd: config.targetRepoPath,
+        stderr: (data: string) => {
+          stderrTail.push(data);
+          if (stderrTail.length > 20) stderrTail.shift();
+        },
       },
-      settingSources: ['project'],
-      cwd: config.targetRepoPath,
-    },
-  })) {
-    if (message.type === 'assistant') {
-      turnCount++;
-      const text = extractAssistantText(message);
-      if (text.trim()) {
-        assistantTexts.push(text);
+    })) {
+      if (message.type === 'assistant') {
+        turnCount++;
+        const text = extractAssistantText(message);
+        if (text.trim()) {
+          assistantTexts.push(text);
+        }
+      }
+      if (message.type === 'result') {
+        const models = Object.keys(message.modelUsage).join(', ') || 'unknown';
+        console.log(`  Cost: $${message.total_cost_usd.toFixed(4)} | ${message.usage.input_tokens ?? 0} in / ${message.usage.output_tokens ?? 0} out | ${message.num_turns} turns | ${models}`);
+        resultSubtype = message.subtype;
+        if (message.subtype === 'success' && !message.is_error) {
+          result = message.result;
+        } else if (message.subtype === 'success') {
+          // is_error results carry the failure text (e.g. "API Error: 400 ...")
+          // in `result` — never post that as an investigation report.
+          console.error(`  Agent ended with error result: ${message.result}`);
+        } else if (message.subtype === 'error_max_turns') {
+          console.error(`  Agent hit max turns (${turnCount}). Last assistant texts may contain a partial report.`);
+        } else {
+          console.error(`  Agent ended with result subtype: ${message.subtype}`);
+        }
       }
     }
-    if (message.type === 'result') {
-      const models = Object.keys(message.modelUsage).join(', ') || 'unknown';
-      console.log(`  Cost: $${message.total_cost_usd.toFixed(4)} | ${message.usage.input_tokens ?? 0} in / ${message.usage.output_tokens ?? 0} out | ${message.num_turns} turns | ${models}`);
-      resultSubtype = message.subtype;
-      if (message.subtype === 'success') {
-        result = message.result;
-      } else if (message.subtype === 'error_max_turns') {
-        console.error(`  Agent hit max turns (${turnCount}). Last assistant texts may contain a partial report.`);
-      } else {
-        console.error(`  Agent ended with result subtype: ${message.subtype}`);
-      }
+  } catch (err) {
+    const stderrText = stderrTail.join('\n').trim();
+    if (stderrText) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      throw new Error(`${errMsg}\n  CLI stderr (last ${stderrTail.length} lines):\n${stderrText}`, { cause: err });
     }
+    throw err;
   }
 
   // If no success result, try to salvage a report from assistant messages

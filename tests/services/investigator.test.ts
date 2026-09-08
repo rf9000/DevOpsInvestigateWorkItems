@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { buildUserPrompt, buildUserMessage, buildSystemPrompt, canUseTool, looksLikeReport } from '../../src/services/investigator.ts';
+import { buildUserPrompt, buildUserMessage, buildSystemPrompt, canUseTool, denyDestructiveBashHook, looksLikeReport } from '../../src/services/investigator.ts';
 import type { InvestigationContext } from '../../src/services/investigator.ts';
 import type { DiscoveredSkill } from '../../src/services/skill-loader.ts';
 import { writeFileSync, mkdtempSync } from 'fs';
@@ -259,6 +259,55 @@ describe('canUseTool', () => {
   test('allows non-Bash tools without checking', async () => {
     const result = await canUseTool('Read', { file_path: '/etc/passwd' });
     expect(result.behavior).toBe('allow');
+  });
+});
+
+describe('denyDestructiveBashHook', () => {
+  const abort = new AbortController();
+
+  function preToolUseInput(toolName: string, toolInput: unknown) {
+    return {
+      hook_event_name: 'PreToolUse',
+      tool_name: toolName,
+      tool_input: toolInput,
+      tool_use_id: 'toolu_test',
+      session_id: 'test',
+      transcript_path: '',
+      cwd: '',
+    } as Parameters<typeof denyDestructiveBashHook>[0];
+  }
+
+  test('denies destructive bash commands with a reason', async () => {
+    const output = await denyDestructiveBashHook(
+      preToolUseInput('Bash', { command: 'rm -rf src/' }),
+      'toolu_test',
+      { signal: abort.signal },
+    );
+    if (!('hookSpecificOutput' in output)) {
+      throw new Error('Expected a sync hook output with hookSpecificOutput');
+    }
+    expect(output.hookSpecificOutput).toMatchObject({
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+    });
+  });
+
+  test('returns empty output for safe bash commands', async () => {
+    const output = await denyDestructiveBashHook(
+      preToolUseInput('Bash', { command: 'git status' }),
+      'toolu_test',
+      { signal: abort.signal },
+    );
+    expect(output).toEqual({});
+  });
+
+  test('returns empty output for non-PreToolUse events', async () => {
+    const output = await denyDestructiveBashHook(
+      { hook_event_name: 'SessionEnd' } as Parameters<typeof denyDestructiveBashHook>[0],
+      undefined,
+      { signal: abort.signal },
+    );
+    expect(output).toEqual({});
   });
 });
 
