@@ -1,8 +1,10 @@
 import { describe, test, expect, mock } from 'bun:test';
 import { runInvestigation } from '../../src/services/investigation-orchestrator.ts';
 import type { OrchestratorDeps } from '../../src/services/investigation-orchestrator.ts';
-import type { AppConfig, InvestigationVerdict, JudgeResult } from '../../src/types/index.ts';
+import type { AppConfig, CallSpend, InvestigationVerdict, JudgeResult } from '../../src/types/index.ts';
 import type { InvestigationContext } from '../../src/services/investigator.ts';
+import { createSpendTracker } from '../../src/services/spend-tracker.ts';
+import type { SpendSink } from '../../src/services/spend-tracker.ts';
 
 function mockConfig(): AppConfig {
   return {
@@ -24,6 +26,7 @@ function mockConfig(): AppConfig {
     attachmentMaxCount: 20,
     promptPath: './prompt.md',
     stateDir: '.state',
+    costLogPath: '.state/cost-ledger.jsonl',
     dryRun: false,
   };
 }
@@ -168,5 +171,74 @@ describe('runInvestigation', () => {
 
     expect(result).toBe('report from claude-opus-4-8');
     expect(appendValidationLog).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('runInvestigation spend tracking', () => {
+  function spend(usd: number, model: string): CallSpend {
+    return {
+      usd,
+      inputTokens: 1,
+      outputTokens: 1,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+      turns: usd > 0 ? 10 : 0,
+      models: [model],
+    };
+  }
+
+  // Each mock reports its spend through the sink it was handed, the way the
+  // real functions do once the SDK returns.
+  function spendingDeps(agree: (call: number) => boolean): OrchestratorDeps {
+    let judgeCall = 0;
+    return {
+      investigateBug: mock((_c: AppConfig, _ctx: InvestigationContext, model: string, onSpend?: SpendSink) => {
+        onSpend?.(spend(1, model));
+        return Promise.resolve(`report from ${model}`);
+      }),
+      extractVerdict: mock((_r: string, model: string, onSpend?: SpendSink) => {
+        onSpend?.(spend(0, model));
+        return Promise.resolve(verdict());
+      }),
+      judgeVerdicts: mock((_a: InvestigationVerdict, _b: InvestigationVerdict, model: string, onSpend?: SpendSink) => {
+        onSpend?.(spend(0, model));
+        judgeCall++;
+        return Promise.resolve({ agree: agree(judgeCall), reason: 'r' });
+      }),
+      appendValidationLog: mock((..._args: unknown[]) => {}),
+    };
+  }
+
+  test('agreement: records both passes, two extractions and one judge call', async () => {
+    const tracker = createSpendTracker();
+    const context = { ...mockContext(), spend: tracker };
+
+    await runInvestigation(mockConfig(), 100, context, spendingDeps(() => true));
+
+    const steps = tracker.snapshot();
+    expect(Object.keys(steps).sort()).toEqual(['extract', 'investigate:A', 'investigate:B', 'judge']);
+    expect(steps['investigate:A']!.calls).toBe(1);
+    expect(steps['investigate:B']!.calls).toBe(1);
+    expect(steps.extract!.calls).toBe(2);
+    expect(steps.judge!.calls).toBe(1);
+    expect(tracker.totalUsd()).toBe(2);
+  });
+
+  test('tiebreak: also records the tiebreak pass and three judge calls', async () => {
+    const tracker = createSpendTracker();
+    const context = { ...mockContext(), spend: tracker };
+
+    await runInvestigation(mockConfig(), 100, context, spendingDeps(() => false));
+
+    const steps = tracker.snapshot();
+    expect(steps['investigate:tiebreak']!.models).toEqual(['claude-opus-4-8']);
+    expect(steps.extract!.calls).toBe(3);
+    expect(steps.judge!.calls).toBe(3);
+    expect(tracker.totalUsd()).toBe(3);
+  });
+
+  test('works without a tracker on the context', async () => {
+    const result = await runInvestigation(mockConfig(), 100, mockContext(), spendingDeps(() => true));
+    expect(result).toBe('report from claude-sonnet-5');
   });
 });

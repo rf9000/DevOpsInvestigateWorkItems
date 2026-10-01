@@ -2,6 +2,8 @@ import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import type { InvestigationVerdict } from '../types/index.ts';
+import { spendFromUsage } from './spend-tracker.ts';
+import type { SpendSink } from './spend-tracker.ts';
 
 const VerdictSchema = z.object({
   isValid: z.enum(['yes', 'no', 'uncertain']),
@@ -28,6 +30,7 @@ export function buildVerdictExtractionPrompt(report: string): string {
 export async function extractVerdict(
   report: string,
   model: string,
+  onSpend?: SpendSink,
 ): Promise<InvestigationVerdict> {
   const client = new Anthropic();
   const response = await client.messages.parse({
@@ -36,6 +39,7 @@ export async function extractVerdict(
     messages: [{ role: 'user', content: buildVerdictExtractionPrompt(report) }],
     output_config: { format: zodOutputFormat(VerdictSchema) },
   });
+  onSpend?.(spendFromUsage(response.usage, model));
 
   if (!response.parsed_output) {
     throw new Error('Verdict extraction failed to produce structured output');

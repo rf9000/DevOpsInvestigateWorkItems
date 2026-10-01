@@ -1,3 +1,4 @@
+import { join } from "path";
 import { z } from "zod";
 import type { AppConfig } from "../types/index.ts";
 
@@ -19,6 +20,7 @@ const envSchema = z.object({
   ASSIGNED_TO_FILTER: z.string().optional(),
   REINVESTIGATE_TAG: z.string().default("agent investigate"),
   STATE_DIR: z.string().default(".state"),
+  COST_LOG_PATH: z.string().optional(),
 });
 
 export function loadConfig(
@@ -70,6 +72,7 @@ export function loadConfig(
     assignedToFilter,
     reinvestigateTag: parsed.REINVESTIGATE_TAG,
     stateDir: parsed.STATE_DIR,
+    costLogPath: parsed.COST_LOG_PATH ?? join(parsed.STATE_DIR, "cost-ledger.jsonl"),
     dryRun: false,
   };
 }

@@ -1,7 +1,7 @@
 import { describe, test, expect, mock } from 'bun:test';
 import { existsSync, readFileSync } from 'fs';
 import { dirname } from 'path';
-import type { AppConfig, ImageAttachment } from '../../src/types/index.ts';
+import type { AppConfig, CostRecord, ImageAttachment } from '../../src/types/index.ts';
 import { processBug } from '../../src/services/processor.ts';
 import type { ProcessorDeps } from '../../src/services/processor.ts';
 import type { InvestigationContext } from '../../src/services/investigator.ts';
@@ -26,6 +26,7 @@ function mockConfig(): AppConfig {
     attachmentMaxCount: 20,
     promptPath: './prompt.md',
     stateDir: '.state',
+    costLogPath: '.state/cost-ledger.jsonl',
     dryRun: false,
   };
 }
@@ -55,6 +56,8 @@ function makeDeps(overrides: Partial<ProcessorDeps> = {}): ProcessorDeps {
     ),
     downloadAttachmentRaw: mock(() => Promise.resolve(Buffer.from('raw-bytes'))),
     getWorkItemComments: mock(() => Promise.resolve([])),
+    // Mocked so tests never write a ledger into the repo's .state.
+    recordCost: mock((_cfg: AppConfig, _entry: CostRecord) => {}),
     ...overrides,
   };
 }
@@ -480,5 +483,96 @@ describe('processBug — malformed comment image names', () => {
     const result = await processBug(mockConfig(), 100, deps);
 
     expect(result.investigated).toBe(true);
+  });
+});
+
+describe('processBug cost ledger', () => {
+  // Stands in for the orchestrator: reports spend through the tracker the
+  // processor put on the context, then returns (or throws).
+  function spendingInvestigation(outcome: 'report' | 'empty' | 'throw') {
+    return mock((_cfg: AppConfig, _bugId: number, ctx: InvestigationContext) => {
+      ctx.spend?.add('investigate:A', {
+        usd: 1.25,
+        inputTokens: 10,
+        outputTokens: 20,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+        turns: 7,
+        models: ['claude-sonnet-5'],
+      });
+      if (outcome === 'throw') return Promise.reject(new Error('pass B crashed'));
+      return Promise.resolve(outcome === 'empty' ? '' : '### Bug Validity\nYes');
+    });
+  }
+
+  function recorded(deps: ProcessorDeps): CostRecord[] {
+    return (deps.recordCost as ReturnType<typeof mock>).mock.calls.map((c) => c[1] as CostRecord);
+  }
+
+  test('success writes one completed record with the tracked spend', async () => {
+    const deps = makeDeps({ runInvestigation: spendingInvestigation('report') });
+
+    await processBug(mockConfig(), 100, deps);
+
+    const records = recorded(deps);
+    expect(records).toHaveLength(1);
+    expect(records[0]!.workItemId).toBe(100);
+    expect(records[0]!.outcome).toBe('completed');
+    expect(records[0]!.costUsd).toBe(1.25);
+    expect(records[0]!.perStage['investigate:A']!.turns).toBe(7);
+    expect(Number.isNaN(Date.parse(records[0]!.at))).toBe(false);
+  });
+
+  test('an investigation that throws writes a failed record with the partial spend', async () => {
+    const deps = makeDeps({ runInvestigation: spendingInvestigation('throw') });
+
+    await processBug(mockConfig(), 100, deps);
+
+    const records = recorded(deps);
+    expect(records).toHaveLength(1);
+    expect(records[0]!.outcome).toBe('failed');
+    expect(records[0]!.costUsd).toBe(1.25);
+  });
+
+  test('an empty result writes a failed record', async () => {
+    const deps = makeDeps({ runInvestigation: spendingInvestigation('empty') });
+
+    await processBug(mockConfig(), 100, deps);
+
+    expect(recorded(deps).map((r) => r.outcome)).toEqual(['failed']);
+  });
+
+  test('a failure before the investigation writes a failed record costing 0', async () => {
+    const deps = makeDeps({ getWorkItem: mock(() => Promise.reject(new Error('Work item not found'))) });
+
+    await processBug(mockConfig(), 100, deps);
+
+    const records = recorded(deps);
+    expect(records).toHaveLength(1);
+    expect(records[0]!.outcome).toBe('failed');
+    expect(records[0]!.costUsd).toBe(0);
+    expect(records[0]!.perStage).toEqual({});
+  });
+
+  test('a dry run writes no record', async () => {
+    const deps = makeDeps({ runInvestigation: spendingInvestigation('report') });
+
+    await processBug({ ...mockConfig(), dryRun: true }, 100, deps);
+
+    expect(recorded(deps)).toHaveLength(0);
+  });
+
+  test('a ledger write failure does not change the result', async () => {
+    const deps = makeDeps({
+      runInvestigation: spendingInvestigation('report'),
+      recordCost: mock(() => {
+        throw new Error('disk full');
+      }),
+    });
+
+    const result = await processBug(mockConfig(), 100, deps);
+
+    expect(result).toEqual({ bugId: 100, investigated: true });
+    expect(deps.addWorkItemComment).toHaveBeenCalledTimes(1);
   });
 });

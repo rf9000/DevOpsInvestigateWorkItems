@@ -2,6 +2,8 @@ import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import type { InvestigationVerdict, JudgeResult } from '../types/index.ts';
+import { spendFromUsage } from './spend-tracker.ts';
+import type { SpendSink } from './spend-tracker.ts';
 
 const JudgeResultSchema = z.object({
   agree: z.boolean(),
@@ -31,6 +33,7 @@ export async function judgeVerdicts(
   verdictA: InvestigationVerdict,
   verdictB: InvestigationVerdict,
   model: string,
+  onSpend?: SpendSink,
 ): Promise<JudgeResult> {
   const client = new Anthropic();
   const response = await client.messages.parse({
@@ -39,6 +42,7 @@ export async function judgeVerdicts(
     messages: [{ role: 'user', content: buildJudgePrompt(verdictA, verdictB) }],
     output_config: { format: zodOutputFormat(JudgeResultSchema) },
   });
+  onSpend?.(spendFromUsage(response.usage, model));
 
   if (!response.parsed_output) {
     throw new Error('Judge failed to produce structured output');

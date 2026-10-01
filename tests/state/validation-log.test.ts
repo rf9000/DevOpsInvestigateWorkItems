@@ -25,6 +25,7 @@ function mockConfig(stateDir: string): AppConfig {
     attachmentMaxCount: 20,
     promptPath: './prompt.md',
     stateDir,
+    costLogPath: join(stateDir, 'cost-ledger.jsonl'),
     dryRun: false,
   };
 }

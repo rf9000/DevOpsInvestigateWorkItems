@@ -9,20 +9,23 @@ import * as inv from './investigator.ts';
 import * as ext from './verdict-extractor.ts';
 import * as jdg from './judge.ts';
 import { appendValidationLog as writeValidationLog } from '../state/validation-log.ts';
+import type { SpendSink } from './spend-tracker.ts';
 
 export interface OrchestratorDeps {
   investigateBug: (
     config: AppConfig,
     context: InvestigationContext,
     model: string,
+    onSpend?: SpendSink,
   ) => Promise<string>;
 
-  extractVerdict: (report: string, model: string) => Promise<InvestigationVerdict>;
+  extractVerdict: (report: string, model: string, onSpend?: SpendSink) => Promise<InvestigationVerdict>;
 
   judgeVerdicts: (
     verdictA: InvestigationVerdict,
     verdictB: InvestigationVerdict,
     model: string,
+    onSpend?: SpendSink,
   ) => Promise<JudgeResult>;
 
   appendValidationLog: (config: AppConfig, entry: ValidationLogEntry) => void;
@@ -62,14 +65,22 @@ interface Pass {
   verdict: InvestigationVerdict;
 }
 
+type PassLabel = 'A' | 'B' | 'tiebreak';
+
+// Routes a call's spend to its step on the context's tracker, if there is one.
+function sinkFor(context: InvestigationContext, step: string): SpendSink {
+  return (call) => context.spend?.add(step, call);
+}
+
 async function runPass(
   config: AppConfig,
   context: InvestigationContext,
   model: string,
+  label: PassLabel,
   deps: OrchestratorDeps,
 ): Promise<Pass> {
-  const report = await deps.investigateBug(config, context, model);
-  const verdict = await deps.extractVerdict(report, config.claudeJudgeModel);
+  const report = await deps.investigateBug(config, context, model, sinkFor(context, `investigate:${label}`));
+  const verdict = await deps.extractVerdict(report, config.claudeJudgeModel, sinkFor(context, 'extract'));
   return { report, verdict };
 }
 
@@ -80,11 +91,12 @@ export async function runInvestigation(
   deps: OrchestratorDeps = defaultDeps,
 ): Promise<string> {
   const [passA, passB] = await Promise.all([
-    runPass(config, context, config.claudeModel, deps),
-    runPass(config, context, config.claudeModel, deps),
+    runPass(config, context, config.claudeModel, 'A', deps),
+    runPass(config, context, config.claudeModel, 'B', deps),
   ]);
 
-  const abJudgment = await deps.judgeVerdicts(passA.verdict, passB.verdict, config.claudeJudgeModel);
+  const judgeSink = sinkFor(context, 'judge');
+  const abJudgment = await deps.judgeVerdicts(passA.verdict, passB.verdict, config.claudeJudgeModel, judgeSink);
 
   if (abJudgment.agree) {
     safeAppendValidationLog(deps, config, {
@@ -99,9 +111,9 @@ export async function runInvestigation(
     return passA.report;
   }
 
-  const tiebreak = await runPass(config, context, config.claudeTiebreakModel, deps);
-  const aVsTiebreak = await deps.judgeVerdicts(passA.verdict, tiebreak.verdict, config.claudeJudgeModel);
-  const bVsTiebreak = await deps.judgeVerdicts(passB.verdict, tiebreak.verdict, config.claudeJudgeModel);
+  const tiebreak = await runPass(config, context, config.claudeTiebreakModel, 'tiebreak', deps);
+  const aVsTiebreak = await deps.judgeVerdicts(passA.verdict, tiebreak.verdict, config.claudeJudgeModel, judgeSink);
+  const bVsTiebreak = await deps.judgeVerdicts(passB.verdict, tiebreak.verdict, config.claudeJudgeModel, judgeSink);
 
   // The tiebreak resolves *which* of pass A or B was correct. If it agrees
   // with one side, that side's own report is posted (its verdict was

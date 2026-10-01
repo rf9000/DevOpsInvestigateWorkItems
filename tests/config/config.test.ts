@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { loadConfig } from "../../src/config/index.ts";
+import { join } from "path";
 
 const validEnv: Record<string, string> = {
   AZURE_DEVOPS_PAT: "test-pat-token",
@@ -195,5 +196,17 @@ describe('attachment config', () => {
     });
     expect(config.attachmentMaxBytes).toBe(1024);
     expect(config.attachmentMaxCount).toBe(3);
+  });
+});
+
+describe('cost ledger config', () => {
+  it('defaults COST_LOG_PATH to cost-ledger.jsonl inside STATE_DIR', () => {
+    const config = loadConfig({ ...validEnv, STATE_DIR: 'data' });
+    expect(config.costLogPath).toBe(join('data', 'cost-ledger.jsonl'));
+  });
+
+  it('uses COST_LOG_PATH when set', () => {
+    const config = loadConfig({ ...validEnv, COST_LOG_PATH: '/var/log/spend.jsonl' });
+    expect(config.costLogPath).toBe('/var/log/spend.jsonl');
   });
 });

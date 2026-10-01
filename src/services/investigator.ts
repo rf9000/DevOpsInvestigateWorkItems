@@ -6,6 +6,8 @@ import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages/mes
 import type { AppConfig, ImageAttachment } from '../types/index.ts';
 import type { DiscoveredSkill } from './skill-loader.ts';
 import type { MaterializedAttachment, SkippedAttachment } from './attachments.ts';
+import { spendFromAgentResult } from './spend-tracker.ts';
+import type { SpendSink, SpendTracker } from './spend-tracker.ts';
 
 const DENIED_BASH_PATTERNS = [
   /\bgit\s+(push|commit|merge|rebase|reset|checkout|branch\s+-[dD]|stash\s+drop|clean|tag\s+-d)/,
@@ -78,6 +80,8 @@ export interface InvestigationContext {
   skippedAttachments: SkippedAttachment[];
   /** The discussion thread, already stripped to plain text. */
   comments: string;
+  /** Collects the spend of every LLM call made for this work item, for the cost ledger. */
+  spend?: SpendTracker;
 }
 
 export function buildUserMessage(context: InvestigationContext): SDKUserMessage {
@@ -163,6 +167,7 @@ export async function investigateBug(
   config: AppConfig,
   context: InvestigationContext,
   model: string,
+  onSpend?: SpendSink,
 ): Promise<string> {
   const systemPrompt = buildSystemPrompt(config.promptPath, context.discoveredSkills);
 
@@ -203,6 +208,8 @@ export async function investigateBug(
       if (message.type === 'result') {
         const models = Object.keys(message.modelUsage).join(', ') || 'unknown';
         console.log(`  Cost: $${message.total_cost_usd.toFixed(4)} | ${message.usage.input_tokens ?? 0} in / ${message.usage.output_tokens ?? 0} out | ${message.num_turns} turns | ${models}`);
+        // Error and max-turn results still cost money, so record spend first.
+        onSpend?.(spendFromAgentResult(message));
         resultSubtype = message.subtype;
         if (message.subtype === 'success' && !message.is_error) {
           result = message.result;

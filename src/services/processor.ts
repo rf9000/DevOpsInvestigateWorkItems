@@ -1,6 +1,7 @@
 import type {
   AppConfig,
   BugProcessResult,
+  CostRecord,
   ImageAttachment,
   WorkItemComment,
   WorkItemResponse,
@@ -9,6 +10,7 @@ import type { InvestigationContext } from './investigator.ts';
 import type { AttachmentDownload } from '../sdk/azure-devops-client.ts';
 import type { DiscoveredSkill } from './skill-loader.ts';
 import type { MaterializedAttachment, SkippedAttachment } from './attachments.ts';
+import type { SpendTracker } from './spend-tracker.ts';
 
 import { rmSync } from 'fs';
 import { tmpdir } from 'os';
@@ -20,6 +22,8 @@ import * as sl from './skill-loader.ts';
 import { extractImageUrls, stripHtmlToText } from '../utils/html.ts';
 import { materializeAttachments, selectAttachmentRelations } from './attachments.ts';
 import { formatCommentThread } from './comments.ts';
+import { createSpendTracker } from './spend-tracker.ts';
+import { appendCostRecord } from '../state/cost-ledger.ts';
 
 export interface ProcessorDeps {
   getWorkItem: (
@@ -56,6 +60,8 @@ export interface ProcessorDeps {
     config: AppConfig,
     workItemId: number,
   ) => Promise<WorkItemComment[]>;
+
+  recordCost: (config: AppConfig, entry: CostRecord) => void;
 }
 
 const defaultDeps: ProcessorDeps = {
@@ -66,6 +72,7 @@ const defaultDeps: ProcessorDeps = {
   downloadAttachment: sdk.downloadAttachment,
   downloadAttachmentRaw: sdk.downloadAttachmentRaw,
   getWorkItemComments: sdk.getWorkItemComments,
+  recordCost: (config, entry) => appendCostRecord(config.costLogPath, entry),
 };
 
 /**
@@ -88,6 +95,30 @@ function log(message: string): void {
   console.log(`[${ts}] ${message}`);
 }
 
+// The ledger is bookkeeping for the dashboard, so a failed write must never
+// change the outcome of a bug. Dry runs post nothing, so they record nothing.
+function safeRecordCost(
+  deps: ProcessorDeps,
+  config: AppConfig,
+  bugId: number,
+  spend: SpendTracker,
+  outcome: CostRecord['outcome'],
+): void {
+  if (config.dryRun) return;
+  try {
+    deps.recordCost(config, {
+      at: new Date().toISOString(),
+      workItemId: bugId,
+      outcome,
+      costUsd: spend.totalUsd(),
+      perStage: spend.snapshot(),
+    });
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    log(`  Bug #${bugId}: Skipping cost ledger write — ${errMsg}`);
+  }
+}
+
 export async function processBug(
   config: AppConfig,
   bugId: number,
@@ -98,6 +129,7 @@ export async function processBug(
   // Scratch space for this bug's attachments. Held outside the try so the
   // finally can always clear it, and reused across all investigation passes.
   const attachmentDir = join(tmpdir(), 'ado-attachments', String(bugId));
+  const spend = createSpendTracker();
 
   try {
     const workItem = await deps.getWorkItem(config, bugId);
@@ -198,6 +230,7 @@ export async function processBug(
       attachments,
       skippedAttachments,
       comments,
+      spend,
     };
 
     log(`  Bug #${bugId}: Starting investigation...`);
@@ -205,6 +238,7 @@ export async function processBug(
 
     if (!output || !output.trim()) {
       log(`  Bug #${bugId}: Investigation returned empty result — skipping comment`);
+      safeRecordCost(deps, config, bugId, spend, 'failed');
       return { bugId, investigated: false, error: 'Investigation returned empty result' };
     }
 
@@ -224,11 +258,13 @@ export async function processBug(
     const commentHtml = await marked(finalOutput);
     await deps.addWorkItemComment(config, bugId, commentHtml);
     log(`  Bug #${bugId}: Investigation posted as comment`);
+    safeRecordCost(deps, config, bugId, spend, 'completed');
 
     return { bugId, investigated: true };
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
     log(`  Bug #${bugId}: Error — ${errorMsg}`);
+    safeRecordCost(deps, config, bugId, spend, 'failed');
     return { bugId, investigated: false, error: errorMsg };
   } finally {
     try {
