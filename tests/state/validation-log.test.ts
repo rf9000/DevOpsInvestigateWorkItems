@@ -21,6 +21,8 @@ function mockConfig(stateDir: string): AppConfig {
     claudeJudgeModel: 'claude-haiku-4-5',
     claudeTiebreakModel: 'claude-opus-4-8',
     claudeMaxTurns: 40,
+    attachmentMaxBytes: 10 * 1024 * 1024,
+    attachmentMaxCount: 20,
     promptPath: './prompt.md',
     stateDir,
     dryRun: false,

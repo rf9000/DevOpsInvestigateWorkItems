@@ -1,5 +1,6 @@
 import type {
   AppConfig,
+  WorkItemComment,
   WorkItemResponse,
 } from '../types/index.ts';
 
@@ -296,6 +297,70 @@ export async function downloadAttachment(
   }
 
   throw new Error('downloadAttachment: unexpected code path');
+}
+
+/**
+ * Download an attachment of any content type as raw bytes.
+ *
+ * Unlike `downloadAttachment`, this does not restrict to image media types —
+ * it backs the Attachments-tab flow, where logs, XML and archives are normal.
+ * `maxBytes` is checked against Content-Length before the body is read so an
+ * oversized file cannot exhaust memory on the way to being rejected.
+ */
+export async function downloadAttachmentRaw(
+  config: AppConfig,
+  attachmentUrl: string,
+  maxBytes: number,
+  retryDelays: number[] = DEFAULT_RETRY_DELAYS,
+): Promise<Buffer> {
+  const authHeader =
+    'Basic ' + Buffer.from(':' + config.pat).toString('base64');
+  const maxAttempts = retryDelays.length + 1;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const res = await fetch(attachmentUrl, {
+      headers: { Authorization: authHeader },
+    });
+
+    if (!res.ok) {
+      const isLastAttempt = attempt === maxAttempts;
+      if (res.status < 500 || isLastAttempt) {
+        throw new AzureDevOpsError(
+          `Attachment download error ${res.status}: ${attachmentUrl}`,
+          res.status,
+        );
+      }
+      const delay = retryDelays[attempt - 1] ?? 0;
+      await new Promise((r) => setTimeout(r, delay));
+      continue;
+    }
+
+    const declaredLength = Number(res.headers.get('Content-Length') ?? '');
+    if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+      throw new AzureDevOpsError(
+        `Attachment exceeds ${maxBytes} byte limit (${declaredLength} bytes): ${attachmentUrl}`,
+        0,
+      );
+    }
+
+    return Buffer.from(await res.arrayBuffer());
+  }
+
+  throw new Error('downloadAttachmentRaw: unexpected code path');
+}
+
+interface CommentListResponse {
+  comments?: WorkItemComment[];
+}
+
+/** Fetch the discussion thread on a work item. */
+export async function getWorkItemComments(
+  config: AppConfig,
+  workItemId: number,
+): Promise<WorkItemComment[]> {
+  const path = `wit/workItems/${workItemId}/comments?api-version=7.0-preview.4`;
+  const data = await adoFetchWithRetry<CommentListResponse>(config, path);
+  return data.comments ?? [];
 }
 
 interface CommentResponse {

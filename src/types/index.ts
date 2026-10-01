@@ -12,11 +12,20 @@ export interface AppConfig {
   claudeJudgeModel: string;
   claudeTiebreakModel: string;
   claudeMaxTurns: number;
+  attachmentMaxBytes: number;
+  attachmentMaxCount: number;
   promptPath: string;
   assignedToFilter: string[];
   reinvestigateTag: string;
   stateDir: string;
   dryRun: boolean;
+}
+
+/** A link from a work item to another item or file, returned under $expand=all. */
+export interface WorkItemRelation {
+  rel: string;
+  url: string;
+  attributes?: Record<string, unknown>;
 }
 
 /** Response shape when fetching a single work item. */
@@ -25,6 +34,15 @@ export interface WorkItemResponse {
   fields: Record<string, unknown>;
   rev: number;
   url: string;
+  relations?: WorkItemRelation[];
+}
+
+/** A single comment on a work item's discussion thread. */
+export interface WorkItemComment {
+  id: number;
+  text: string;
+  createdDate?: string;
+  createdBy?: { displayName?: string };
 }
 
 /** Persisted state tracking which bugs have already been processed. */

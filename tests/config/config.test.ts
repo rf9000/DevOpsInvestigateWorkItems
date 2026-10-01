@@ -175,3 +175,25 @@ describe("loadConfig", () => {
     expect(config.orgUrl).toBe("https://dev.azure.com/contoso");
   });
 });
+
+describe('attachment config', () => {
+  it("defaults ATTACHMENT_MAX_BYTES to 10MB", () => {
+    const config = loadConfig(validEnv);
+    expect(config.attachmentMaxBytes).toBe(10 * 1024 * 1024);
+  });
+
+  it("defaults ATTACHMENT_MAX_COUNT to 20", () => {
+    const config = loadConfig(validEnv);
+    expect(config.attachmentMaxCount).toBe(20);
+  });
+
+  it("overrides both when set", () => {
+    const config = loadConfig({
+      ...validEnv,
+      ATTACHMENT_MAX_BYTES: "1024",
+      ATTACHMENT_MAX_COUNT: "3",
+    });
+    expect(config.attachmentMaxBytes).toBe(1024);
+    expect(config.attachmentMaxCount).toBe(3);
+  });
+});

@@ -1,4 +1,6 @@
 import { describe, test, expect, mock } from 'bun:test';
+import { existsSync, readFileSync } from 'fs';
+import { dirname } from 'path';
 import type { AppConfig, ImageAttachment } from '../../src/types/index.ts';
 import { processBug } from '../../src/services/processor.ts';
 import type { ProcessorDeps } from '../../src/services/processor.ts';
@@ -20,6 +22,8 @@ function mockConfig(): AppConfig {
     claudeJudgeModel: 'claude-haiku-4-5',
     claudeTiebreakModel: 'claude-opus-4-8',
     claudeMaxTurns: 40,
+    attachmentMaxBytes: 10 * 1024 * 1024,
+    attachmentMaxCount: 20,
     promptPath: './prompt.md',
     stateDir: '.state',
     dryRun: false,
@@ -49,6 +53,8 @@ function makeDeps(overrides: Partial<ProcessorDeps> = {}): ProcessorDeps {
         mediaType: 'image/png' as const,
       }),
     ),
+    downloadAttachmentRaw: mock(() => Promise.resolve(Buffer.from('raw-bytes'))),
+    getWorkItemComments: mock(() => Promise.resolve([])),
     ...overrides,
   };
 }
@@ -287,5 +293,192 @@ describe('processBug', () => {
 
     const context = investigateMock.mock.calls[0]![2] as InvestigationContext;
     expect(context.images).toEqual([]);
+  });
+});
+
+describe('processBug — attachments and comments', () => {
+  const attachedRelation = (name: string) => ({
+    rel: 'AttachedFile',
+    url: `https://ado/_apis/wit/attachments/${name}`,
+    attributes: { name },
+  });
+
+  function depsWith(overrides: Partial<ProcessorDeps> = {}, relations: unknown[] = []) {
+    return makeDeps({
+      getWorkItem: mock(() =>
+        Promise.resolve({
+          id: 100,
+          fields: {
+            'System.Title': 'Bank lookup fails',
+            'System.Description': 'desc',
+            'Microsoft.VSTS.TCM.ReproSteps': 'steps',
+          },
+          rev: 1,
+          url: 'https://example.com/100',
+          relations,
+        } as never),
+      ),
+      ...overrides,
+    });
+  }
+
+  test('puts downloaded attachments into the investigation context', async () => {
+    const deps = depsWith(
+      { downloadAttachmentRaw: mock(() => Promise.resolve(Buffer.from('log body'))) },
+      [attachedRelation('trace.log')],
+    );
+
+    // The file only exists for the duration of the investigation, so read it
+    // from inside the pass rather than after cleanup has run.
+    let presentDuringRun = false;
+    let contentDuringRun = '';
+    deps.runInvestigation = mock((_c: AppConfig, _id: number, ctx: InvestigationContext) => {
+      presentDuringRun = existsSync(ctx.attachments[0]!.localPath);
+      contentDuringRun = readFileSync(ctx.attachments[0]!.localPath, 'utf8');
+      return Promise.resolve('### Bug Validity\nYes');
+    }) as ProcessorDeps['runInvestigation'];
+
+    await processBug(mockConfig(), 100, deps);
+
+    const context = (deps.runInvestigation as ReturnType<typeof mock>).mock.calls[0]![2] as InvestigationContext;
+    expect(context.attachments).toHaveLength(1);
+    expect(context.attachments[0]!.fileName).toBe('trace.log');
+    expect(presentDuringRun).toBe(true);
+    expect(contentDuringRun).toBe('log body');
+  });
+
+  test('puts the formatted comment thread into the investigation context', async () => {
+    const deps = depsWith({
+      getWorkItemComments: mock(() =>
+        Promise.resolve([
+          { id: 1, text: '<p>still reproducing</p>', createdDate: '2026-09-01T10:00:00Z' },
+        ]),
+      ),
+    });
+
+    await processBug(mockConfig(), 100, deps);
+
+    const context = (deps.runInvestigation as ReturnType<typeof mock>).mock.calls[0]![2] as InvestigationContext;
+    expect(context.comments).toContain('still reproducing');
+  });
+
+  test('removes the attachment directory after a successful investigation', async () => {
+    const deps = depsWith(
+      { downloadAttachmentRaw: mock(() => Promise.resolve(Buffer.from('x'))) },
+      [attachedRelation('a.txt')],
+    );
+
+    let capturedDir = '';
+    deps.runInvestigation = mock((_c: AppConfig, _id: number, ctx: InvestigationContext) => {
+      capturedDir = dirname(ctx.attachments[0]!.localPath);
+      return Promise.resolve('### Bug Validity\nYes');
+    }) as ProcessorDeps['runInvestigation'];
+
+    await processBug(mockConfig(), 100, deps);
+
+    expect(capturedDir).not.toBe('');
+    expect(existsSync(capturedDir)).toBe(false);
+  });
+
+  test('removes the attachment directory when the investigation throws', async () => {
+    const deps = depsWith(
+      { downloadAttachmentRaw: mock(() => Promise.resolve(Buffer.from('x'))) },
+      [attachedRelation('a.txt')],
+    );
+
+    let capturedDir = '';
+    deps.runInvestigation = mock((_c: AppConfig, _id: number, ctx: InvestigationContext) => {
+      capturedDir = dirname(ctx.attachments[0]!.localPath);
+      return Promise.reject(new Error('agent exploded'));
+    }) as ProcessorDeps['runInvestigation'];
+
+    const result = await processBug(mockConfig(), 100, deps);
+
+    expect(result.investigated).toBe(false);
+    expect(capturedDir).not.toBe('');
+    expect(existsSync(capturedDir)).toBe(false);
+  });
+
+  test('still investigates when fetching comments fails', async () => {
+    const deps = depsWith({
+      getWorkItemComments: mock(() => Promise.reject(new Error('403 forbidden'))),
+    });
+
+    const result = await processBug(mockConfig(), 100, deps);
+
+    expect(result.investigated).toBe(true);
+    const context = (deps.runInvestigation as ReturnType<typeof mock>).mock.calls[0]![2] as InvestigationContext;
+    expect(context.comments).toBe('');
+  });
+
+  test('records attachments that could not be downloaded', async () => {
+    const deps = depsWith(
+      { downloadAttachmentRaw: mock(() => Promise.reject(new Error('404 gone'))) },
+      [attachedRelation('missing.bin')],
+    );
+
+    await processBug(mockConfig(), 100, deps);
+
+    const context = (deps.runInvestigation as ReturnType<typeof mock>).mock.calls[0]![2] as InvestigationContext;
+    expect(context.attachments).toEqual([]);
+    expect(context.skippedAttachments[0]!.fileName).toBe('missing.bin');
+  });
+});
+
+describe('processBug — images embedded in comments', () => {
+  test('downloads images found in comment HTML into the attachment directory', async () => {
+    const deps = makeDeps({
+      getWorkItemComments: mock(() =>
+        Promise.resolve([
+          {
+            id: 1,
+            text: '<p>see this</p><img src="https://ado/_apis/wit/attachments/z?fileName=later.png" alt="later">',
+            createdDate: '2026-09-02T10:00:00Z',
+          },
+        ]),
+      ),
+      downloadAttachmentRaw: mock(() => Promise.resolve(Buffer.from('png bytes'))),
+    });
+
+    await processBug(mockConfig(), 100, deps);
+
+    const context = (deps.runInvestigation as ReturnType<typeof mock>).mock.calls[0]![2] as InvestigationContext;
+    expect(context.attachments.map((a) => a.fileName)).toContain('later.png');
+  });
+
+  test('does not treat a non-attachment image in a comment as an attachment', async () => {
+    const deps = makeDeps({
+      getWorkItemComments: mock(() =>
+        Promise.resolve([
+          { id: 1, text: '<img src="https://example.com/tracking-pixel.gif">', createdDate: '2026-09-02T10:00:00Z' },
+        ]),
+      ),
+    });
+
+    await processBug(mockConfig(), 100, deps);
+
+    const context = (deps.runInvestigation as ReturnType<typeof mock>).mock.calls[0]![2] as InvestigationContext;
+    expect(context.attachments).toEqual([]);
+  });
+});
+
+describe('processBug — malformed comment image names', () => {
+  test('survives a filename with an invalid percent-escape', async () => {
+    const deps = makeDeps({
+      getWorkItemComments: mock(() =>
+        Promise.resolve([
+          {
+            id: 1,
+            text: '<img src="https://ado/_apis/wit/attachments/z?fileName=bad%zz.png">',
+            createdDate: '2026-09-02T10:00:00Z',
+          },
+        ]),
+      ),
+      downloadAttachmentRaw: mock(() => Promise.resolve(Buffer.from('bytes'))),
+    });
+
+    const result = await processBug(mockConfig(), 100, deps);
+
+    expect(result.investigated).toBe(true);
   });
 });

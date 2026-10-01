@@ -12,6 +12,8 @@ import {
   removeTagFromWorkItem,
   addWorkItemComment,
   downloadAttachment,
+  downloadAttachmentRaw,
+  getWorkItemComments,
 } from '../../src/sdk/azure-devops-client.ts';
 
 const originalFetch = globalThis.fetch;
@@ -33,6 +35,8 @@ function mockConfig(): AppConfig {
     claudeJudgeModel: 'claude-haiku-4-5',
     claudeTiebreakModel: 'claude-opus-4-8',
     claudeMaxTurns: 40,
+    attachmentMaxBytes: 10 * 1024 * 1024,
+    attachmentMaxCount: 20,
     promptPath: './prompt.md',
     stateDir: '.state',
     dryRun: false,
@@ -745,5 +749,99 @@ describe('error handling', () => {
       expect(adoErr.name).toBe('AzureDevOpsError');
       expect(adoErr.message).toContain('404');
     }
+  });
+});
+
+describe('downloadAttachmentRaw', () => {
+  const url = 'https://dev.azure.com/org/_apis/wit/attachments/abc?fileName=trace.log';
+
+  function setMockRaw(body: ArrayBuffer, headers: Record<string, string> = {}, status = 200) {
+    mockFn = mock(() =>
+      Promise.resolve(
+        new Response(body, {
+          status,
+          statusText: status >= 400 ? 'Error' : 'OK',
+          headers,
+        }),
+      ),
+    );
+    globalThis.fetch = mockFn as unknown as typeof fetch;
+  }
+
+  test('returns bytes for a non-image content type', async () => {
+    const data = new TextEncoder().encode('log line');
+    setMockRaw(data.buffer as ArrayBuffer, { 'Content-Type': 'text/plain' });
+
+    const result = await downloadAttachmentRaw(mockConfig(), url, 1_000_000, [0]);
+
+    expect(result).toBeInstanceOf(Buffer);
+    expect(result.toString('utf8')).toBe('log line');
+  });
+
+  test('sends the PAT auth header', async () => {
+    setMockRaw(new TextEncoder().encode('x').buffer as ArrayBuffer);
+
+    await downloadAttachmentRaw(mockConfig(), url, 1_000_000, [0]);
+
+    const init = mockFn.mock.calls[0]![1] as RequestInit;
+    const headers = init.headers as Record<string, string>;
+    expect(headers['Authorization']).toBe(
+      'Basic ' + Buffer.from(':test-pat-token').toString('base64'),
+    );
+  });
+
+  test('rejects before reading the body when Content-Length exceeds the cap', async () => {
+    setMockRaw(new ArrayBuffer(0), { 'Content-Length': '99999999' });
+
+    try {
+      await downloadAttachmentRaw(mockConfig(), url, 1000, [0]);
+      throw new Error('should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(AzureDevOpsError);
+      expect((err as AzureDevOpsError).message).toContain('exceeds');
+    }
+  });
+
+  test('throws on 404', async () => {
+    setMockRaw(new ArrayBuffer(0), {}, 404);
+
+    try {
+      await downloadAttachmentRaw(mockConfig(), url, 1_000_000, [0]);
+      throw new Error('should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(AzureDevOpsError);
+    }
+  });
+});
+
+describe('getWorkItemComments', () => {
+  test('returns the comments array', async () => {
+    setMockFetch({
+      totalCount: 1,
+      count: 1,
+      comments: [
+        { id: 7, text: '<p>still broken</p>', createdDate: '2026-09-01T10:00:00Z' },
+      ],
+    });
+
+    const result = await getWorkItemComments(mockConfig(), 82007);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]!.id).toBe(7);
+  });
+
+  test('returns an empty array when the payload has no comments', async () => {
+    setMockFetch({ totalCount: 0, count: 0 });
+
+    expect(await getWorkItemComments(mockConfig(), 82007)).toEqual([]);
+  });
+
+  test('requests the comments endpoint for the work item', async () => {
+    setMockFetch({ comments: [] });
+
+    await getWorkItemComments(mockConfig(), 82007);
+
+    const url = mockFn.mock.calls[0]![0] as string;
+    expect(url).toContain('/wit/workItems/82007/comments');
   });
 });

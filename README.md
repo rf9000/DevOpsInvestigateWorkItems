@@ -6,7 +6,7 @@ Automatically investigates new bugs under Azure DevOps feature work items using 
 
 1. Polls Azure DevOps for bug work items linked under configured feature IDs
 2. Tracks which bugs have already been processed (JSON state file)
-3. For each new bug, sends the title, description, and repro steps to a Claude agent
+3. For each new bug, sends the title, description, repro steps, and discussion thread to a Claude agent. Inline screenshots are attached as images; files from the Attachments tab are downloaded to a scratch directory the agent can read on demand, then deleted after the run
 4. The Claude agent investigates the bug against a local codebase using Read, Grep, Glob, and Bash tools
 5. Posts the investigation result as a comment on the Azure DevOps work item
 
@@ -89,6 +89,8 @@ The service runs as a Docker container on an Azure VM. Target repositories and t
 | `CLAUDE_JUDGE_MODEL` | claude-haiku-4-5 | Model that compares the two investigation verdicts |
 | `CLAUDE_TIEBREAK_MODEL` | claude-opus-4-8 | Model used for the tiebreak pass when the two passes disagree |
 | `CLAUDE_MAX_TURNS` | 40 | Max agent turns per investigation pass |
+| `ATTACHMENT_MAX_BYTES` | 10485760 | Largest single work item attachment to download (10MB) |
+| `ATTACHMENT_MAX_COUNT` | 20 | Max attachments downloaded per work item |
 | `PROMPT_PATH` | .claude/commands/do-process-item.md | Path to the investigation prompt |
 | `SKILLS_DIR` | .claude/commands | Directory containing skill `.md` files loaded into the agent |
 | `ASSIGNED_TO_FILTER` | *(all)* | Comma-separated names to filter bugs by assignee |

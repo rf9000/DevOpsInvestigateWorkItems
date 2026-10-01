@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { buildUserPrompt, buildUserMessage, buildSystemPrompt, canUseTool, denyDestructiveBashHook, looksLikeReport } from '../../src/services/investigator.ts';
+import { buildQueryOptions, buildUserPrompt, buildUserMessage, buildSystemPrompt, canUseTool, denyDestructiveBashHook, looksLikeReport } from '../../src/services/investigator.ts';
 import type { InvestigationContext } from '../../src/services/investigator.ts';
 import type { DiscoveredSkill } from '../../src/services/skill-loader.ts';
 import { writeFileSync, mkdtempSync } from 'fs';
@@ -13,6 +13,9 @@ describe('buildUserPrompt', () => {
     bugReproSteps: '1. Login with valid credentials\n2. Wait for token to expire\n3. Try to access dashboard',
     discoveredSkills: [],
     images: [],
+    attachments: [],
+    skippedAttachments: [],
+    comments: '',
   };
 
   test('includes bug title', () => {
@@ -78,6 +81,9 @@ describe('buildUserMessage', () => {
     bugReproSteps: '1. Login',
     discoveredSkills: [],
     images: [],
+    attachments: [],
+    skippedAttachments: [],
+    comments: '',
   };
 
   test('returns SDKUserMessage with text-only when no images', () => {
@@ -334,5 +340,120 @@ describe('looksLikeReport', () => {
   test('returns false with only 1 header', () => {
     const oneHeader = `### Bug Validity\nYes, this is a bug.`;
     expect(looksLikeReport(oneHeader)).toBe(false);
+  });
+});
+
+describe('buildUserPrompt — attachments and comments', () => {
+  const base: InvestigationContext = {
+    bugTitle: 'Bank lookup returns nothing',
+    bugDescription: 'desc',
+    bugReproSteps: 'steps',
+    discoveredSkills: [],
+    images: [],
+    attachments: [],
+    skippedAttachments: [],
+    comments: '',
+  };
+
+  test('lists each attachment with its path so the agent can read it', () => {
+    const prompt = buildUserPrompt({
+      ...base,
+      attachments: [
+        { fileName: 'error.log', localPath: '/tmp/ado/82007/error.log', sizeBytes: 2048 },
+      ],
+    });
+
+    expect(prompt).toContain('error.log');
+    expect(prompt).toContain('/tmp/ado/82007/error.log');
+  });
+
+  test('tells the agent to read attachments on demand', () => {
+    const prompt = buildUserPrompt({
+      ...base,
+      attachments: [
+        { fileName: 'a.txt', localPath: '/tmp/ado/1/a.txt', sizeBytes: 10 },
+      ],
+    });
+
+    expect(prompt).toContain('Read');
+  });
+
+  test('omits the attachment section when there are none', () => {
+    expect(buildUserPrompt(base)).not.toContain('**Attached Files:**');
+  });
+
+  test('reports attachments that could not be downloaded', () => {
+    const prompt = buildUserPrompt({
+      ...base,
+      skippedAttachments: [{ fileName: 'huge.zip', reason: 'exceeds 10485760 byte limit' }],
+    });
+
+    expect(prompt).toContain('huge.zip');
+    expect(prompt).toContain('exceeds');
+  });
+
+  test('includes the comment thread when present', () => {
+    const prompt = buildUserPrompt({ ...base, comments: '**Ada** (2026-09-01):\nstill broken' });
+
+    expect(prompt).toContain('**Discussion:**');
+    expect(prompt).toContain('still broken');
+  });
+
+  test('omits the discussion section when there are no comments', () => {
+    expect(buildUserPrompt(base)).not.toContain('**Discussion:**');
+  });
+});
+
+describe('buildQueryOptions', () => {
+  const base: InvestigationContext = {
+    bugTitle: 't',
+    bugDescription: 'd',
+    bugReproSteps: 's',
+    discoveredSkills: [],
+    images: [],
+    attachments: [],
+    skippedAttachments: [],
+    comments: '',
+  };
+
+  const config = {
+    claudeMaxTurns: 40,
+    targetRepoPath: 'C:/repos/target',
+  } as never;
+
+  test('grants access to the attachment directory when attachments exist', () => {
+    const options = buildQueryOptions(config, 'claude-sonnet-5', {
+      ...base,
+      attachments: [
+        { fileName: 'a.log', localPath: '/tmp/ado-attachments/82007/a.log', sizeBytes: 5 },
+      ],
+    }, 'sys', () => {});
+
+    expect(options.additionalDirectories).toEqual(['/tmp/ado-attachments/82007']);
+  });
+
+  test('grants access to one directory even with several attachments', () => {
+    const options = buildQueryOptions(config, 'claude-sonnet-5', {
+      ...base,
+      attachments: [
+        { fileName: 'a.log', localPath: '/tmp/ado-attachments/1/a.log', sizeBytes: 5 },
+        { fileName: 'b.log', localPath: '/tmp/ado-attachments/1/b.log', sizeBytes: 5 },
+      ],
+    }, 'sys', () => {});
+
+    expect(options.additionalDirectories).toEqual(['/tmp/ado-attachments/1']);
+  });
+
+  test('omits additionalDirectories when there are no attachments', () => {
+    const options = buildQueryOptions(config, 'claude-sonnet-5', base, 'sys', () => {});
+
+    expect(options.additionalDirectories).toBeUndefined();
+  });
+
+  test('carries the model and turn limit through', () => {
+    const options = buildQueryOptions(config, 'claude-opus-4-8', base, 'sys', () => {});
+
+    expect(options.model).toBe('claude-opus-4-8');
+    expect(options.maxTurns).toBe(40);
   });
 });
