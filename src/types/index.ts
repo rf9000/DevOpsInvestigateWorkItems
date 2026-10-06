@@ -13,6 +13,7 @@ export interface AppConfig {
   assignedToFilter: string[];
   reinvestigateTag: string;
   stateDir: string;
+  costLogPath: string;
   dryRun: boolean;
 }
 
@@ -51,6 +52,54 @@ export interface InvestigationResult {
   reproduction: string;
   fixSuggestion: string;
   ambiguities: string[];
+}
+
+/** What one LLM call cost. Messages API calls report tokens only, so their `usd` is 0. */
+export interface CallSpend {
+  usd: number;
+  /** Uncached input tokens — only the part of the prompt the cache did not serve. */
+  inputTokens: number;
+  outputTokens: number;
+  /** Input tokens written into the prompt cache. */
+  cacheCreationInputTokens: number;
+  /** Input tokens served from the prompt cache. */
+  cacheReadInputTokens: number;
+  /** Agent turns; 0 for a single Messages API call. */
+  turns: number;
+  models: string[];
+}
+
+/**
+ * Spend summed over every call one step made. Same shape as DevOpsCoder's
+ * StepSpend, so one dashboard reader handles both ledgers.
+ */
+export interface StepSpend {
+  /** Cumulative USD across every call this step made. */
+  usd: number;
+  /** How many LLM calls this step made. */
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationInputTokens: number;
+  cacheReadInputTokens: number;
+  /** Cumulative agent turns, summed across calls. */
+  turns: number;
+  /** Distinct models this step ran on, in first-seen order. */
+  models: string[];
+}
+
+/** One line of the cost ledger (JSONL): one record per processed work item. */
+export interface CostRecord {
+  /** ISO timestamp of when processing finished. */
+  at: string;
+  workItemId: number;
+  /** The work item's System.Title, when it was fetched before the run ended. */
+  title?: string;
+  outcome: 'completed' | 'failed';
+  /** USD reported by the Agent SDK across the investigation pass(es). */
+  costUsd: number;
+  /** Keyed by step; this bot currently records a single `investigate` step. */
+  perStage: Record<string, StepSpend>;
 }
 
 /** Result summary after processing a single bug. */

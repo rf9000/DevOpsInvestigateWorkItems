@@ -1,8 +1,9 @@
 import { describe, test, expect, mock } from 'bun:test';
-import type { AppConfig, ImageAttachment } from '../../src/types/index.ts';
+import type { AppConfig, CallSpend, CostRecord, ImageAttachment } from '../../src/types/index.ts';
 import { processBug } from '../../src/services/processor.ts';
 import type { ProcessorDeps } from '../../src/services/processor.ts';
 import type { InvestigationContext } from '../../src/services/investigator.ts';
+import type { SpendSink } from '../../src/services/spend-tracker.ts';
 
 function mockConfig(): AppConfig {
   return {
@@ -19,6 +20,7 @@ function mockConfig(): AppConfig {
     claudeModel: 'claude-sonnet-4-6',
     promptPath: './prompt.md',
     stateDir: '.state',
+    costLogPath: '.state/cost-ledger.jsonl',
     dryRun: false,
   };
 }
@@ -46,6 +48,8 @@ function makeDeps(overrides: Partial<ProcessorDeps> = {}): ProcessorDeps {
         mediaType: 'image/png' as const,
       }),
     ),
+    // Mocked so tests never write a ledger into the repo's .state.
+    recordCost: mock((_cfg: AppConfig, _entry: CostRecord) => {}),
     ...overrides,
   };
 }
@@ -284,5 +288,150 @@ describe('processBug', () => {
 
     const context = investigateMock.mock.calls[0]![1] as InvestigationContext;
     expect(context.images).toEqual([]);
+  });
+});
+
+describe('processBug cost ledger', () => {
+  const agentSpend: CallSpend = {
+    usd: 1.25,
+    inputTokens: 10,
+    outputTokens: 20,
+    cacheCreationInputTokens: 0,
+    cacheReadInputTokens: 0,
+    turns: 7,
+    models: ['claude-sonnet-4-6'],
+  };
+
+  // Stands in for investigateBug: reports the agent's spend through the sink
+  // the processor passed, then returns (or throws).
+  function spendingInvestigation(outcome: 'report' | 'empty' | 'throw') {
+    return mock((_cfg: AppConfig, _ctx: InvestigationContext, onSpend?: SpendSink) => {
+      onSpend?.(agentSpend);
+      if (outcome === 'throw') return Promise.reject(new Error('agent crashed'));
+      return Promise.resolve(outcome === 'empty' ? '' : '### Bug Validity\nYes');
+    });
+  }
+
+  function recorded(deps: ProcessorDeps): CostRecord[] {
+    return (deps.recordCost as ReturnType<typeof mock>).mock.calls.map((c) => c[1] as CostRecord);
+  }
+
+  test('success writes one completed record with title and the tracked spend', async () => {
+    const deps = makeDeps({ investigateBug: spendingInvestigation('report') });
+
+    await processBug(mockConfig(), 100, deps);
+
+    const records = recorded(deps);
+    expect(records).toHaveLength(1);
+    const r = records[0]!;
+    expect(r.workItemId).toBe(100);
+    expect(r.title).toBe('Login crashes on expired token');
+    expect(r.outcome).toBe('completed');
+    expect(r.costUsd).toBe(1.25);
+    expect(r.perStage).toEqual({
+      investigate: {
+        usd: 1.25,
+        calls: 1,
+        inputTokens: 10,
+        outputTokens: 20,
+        cacheCreationInputTokens: 0,
+        cacheReadInputTokens: 0,
+        turns: 7,
+        models: ['claude-sonnet-4-6'],
+      },
+    });
+    expect(Number.isNaN(Date.parse(r.at))).toBe(false);
+  });
+
+  test('an investigation that throws writes a failed record with title and partial spend', async () => {
+    const deps = makeDeps({ investigateBug: spendingInvestigation('throw') });
+
+    const result = await processBug(mockConfig(), 100, deps);
+
+    expect(result.investigated).toBe(false);
+    const records = recorded(deps);
+    expect(records).toHaveLength(1);
+    expect(records[0]!.outcome).toBe('failed');
+    expect(records[0]!.title).toBe('Login crashes on expired token');
+    expect(records[0]!.costUsd).toBe(1.25);
+  });
+
+  test('an empty result writes a failed record with title', async () => {
+    const deps = makeDeps({ investigateBug: spendingInvestigation('empty') });
+
+    await processBug(mockConfig(), 100, deps);
+
+    const records = recorded(deps);
+    expect(records.map((r) => r.outcome)).toEqual(['failed']);
+    expect(records[0]!.title).toBe('Login crashes on expired token');
+  });
+
+  test('a failure posting the comment writes a failed record', async () => {
+    const deps = makeDeps({
+      investigateBug: spendingInvestigation('report'),
+      addWorkItemComment: mock(() => Promise.reject(new Error('ADO 500'))),
+    });
+
+    await processBug(mockConfig(), 100, deps);
+
+    const records = recorded(deps);
+    expect(records.map((r) => r.outcome)).toEqual(['failed']);
+    expect(records[0]!.costUsd).toBe(1.25);
+  });
+
+  test('a failure fetching the work item writes a failed record with no title and no cost', async () => {
+    const deps = makeDeps({ getWorkItem: mock(() => Promise.reject(new Error('Work item not found'))) });
+
+    await processBug(mockConfig(), 100, deps);
+
+    const records = recorded(deps);
+    expect(records).toHaveLength(1);
+    expect(records[0]!.outcome).toBe('failed');
+    expect('title' in records[0]!).toBe(false);
+    expect(records[0]!.costUsd).toBe(0);
+    expect(records[0]!.perStage).toEqual({});
+  });
+
+  test('a dry run writes no record', async () => {
+    const deps = makeDeps({ investigateBug: spendingInvestigation('report') });
+
+    await processBug({ ...mockConfig(), dryRun: true }, 100, deps);
+
+    expect(recorded(deps)).toHaveLength(0);
+  });
+
+  test('a failed dry run writes no record either', async () => {
+    const deps = makeDeps({ investigateBug: spendingInvestigation('throw') });
+
+    await processBug({ ...mockConfig(), dryRun: true }, 100, deps);
+
+    expect(recorded(deps)).toHaveLength(0);
+  });
+
+  test('a ledger write failure does not change the result', async () => {
+    const deps = makeDeps({
+      investigateBug: spendingInvestigation('report'),
+      recordCost: mock(() => {
+        throw new Error('disk full');
+      }),
+    });
+
+    const result = await processBug(mockConfig(), 100, deps);
+
+    expect(result).toEqual({ bugId: 100, investigated: true });
+    expect(deps.addWorkItemComment).toHaveBeenCalledTimes(1);
+  });
+
+  test('a ledger write failure on a failed run keeps the original error', async () => {
+    const deps = makeDeps({
+      investigateBug: spendingInvestigation('throw'),
+      recordCost: mock(() => {
+        throw new Error('disk full');
+      }),
+    });
+
+    const result = await processBug(mockConfig(), 100, deps);
+
+    expect(result).toEqual({ bugId: 100, investigated: false, error: 'agent crashed' });
   });
 });

@@ -1,18 +1,22 @@
 import type {
   AppConfig,
   BugProcessResult,
+  CostRecord,
   ImageAttachment,
   WorkItemResponse,
 } from '../types/index.ts';
 import type { InvestigationContext } from './investigator.ts';
 import type { AttachmentDownload } from '../sdk/azure-devops-client.ts';
 import type { DiscoveredSkill } from './skill-loader.ts';
+import type { SpendSink, SpendTracker } from './spend-tracker.ts';
 
 import { marked } from 'marked';
 import * as sdk from '../sdk/azure-devops-client.ts';
 import * as inv from './investigator.ts';
 import * as sl from './skill-loader.ts';
 import { extractImageUrls, stripHtmlToText } from '../utils/html.ts';
+import { createSpendTracker } from './spend-tracker.ts';
+import { appendCostRecord } from '../state/cost-ledger.ts';
 
 export interface ProcessorDeps {
   getWorkItem: (
@@ -23,6 +27,7 @@ export interface ProcessorDeps {
   investigateBug: (
     config: AppConfig,
     context: InvestigationContext,
+    onSpend?: SpendSink,
   ) => Promise<string>;
 
   addWorkItemComment: (
@@ -37,6 +42,8 @@ export interface ProcessorDeps {
     config: AppConfig,
     attachmentUrl: string,
   ) => Promise<AttachmentDownload>;
+
+  recordCost: (config: AppConfig, entry: CostRecord) => void;
 }
 
 const defaultDeps: ProcessorDeps = {
@@ -45,6 +52,7 @@ const defaultDeps: ProcessorDeps = {
   addWorkItemComment: sdk.addWorkItemComment,
   discoverTargetRepoSkills: sl.discoverTargetRepoSkills,
   downloadAttachment: sdk.downloadAttachment,
+  recordCost: (config, entry) => appendCostRecord(config.costLogPath, entry),
 };
 
 function log(message: string): void {
@@ -53,12 +61,42 @@ function log(message: string): void {
   console.log(`[${ts}] ${message}`);
 }
 
+// The ledger is bookkeeping for the dashboard, so a failed write must never
+// change the outcome of a bug. Dry runs post nothing, so they record nothing.
+function safeRecordCost(
+  deps: ProcessorDeps,
+  config: AppConfig,
+  bugId: number,
+  title: string | undefined,
+  spend: SpendTracker,
+  outcome: CostRecord['outcome'],
+): void {
+  if (config.dryRun) return;
+  try {
+    deps.recordCost(config, {
+      at: new Date().toISOString(),
+      workItemId: bugId,
+      ...(title !== undefined ? { title } : {}),
+      outcome,
+      costUsd: spend.totalUsd(),
+      perStage: spend.snapshot(),
+    });
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    log(`  Bug #${bugId}: Skipping cost ledger write — ${errMsg}`);
+  }
+}
+
 export async function processBug(
   config: AppConfig,
   bugId: number,
   deps: ProcessorDeps = defaultDeps,
 ): Promise<BugProcessResult> {
   log(`Processing Bug #${bugId}...`);
+
+  const spend = createSpendTracker();
+  // Known once the work item is fetched; a failure before that records no title.
+  let title: string | undefined;
 
   try {
     const workItem = await deps.getWorkItem(config, bugId);
@@ -69,6 +107,7 @@ export async function processBug(
       workItem.fields['Microsoft.VSTS.TCM.ReproSteps'] ?? '',
     );
 
+    title = bugTitle;
     log(`  Bug #${bugId}: "${bugTitle}"`);
 
     // Extract image URLs from HTML fields (combined max 5)
@@ -116,10 +155,13 @@ export async function processBug(
     };
 
     log(`  Bug #${bugId}: Starting investigation...`);
-    const output = await deps.investigateBug(config, context);
+    const output = await deps.investigateBug(config, context, (call) =>
+      spend.add('investigate', call),
+    );
 
     if (!output || !output.trim()) {
       log(`  Bug #${bugId}: Investigation returned empty result — skipping comment`);
+      safeRecordCost(deps, config, bugId, title, spend, 'failed');
       return { bugId, investigated: false, error: 'Investigation returned empty result' };
     }
 
@@ -139,11 +181,13 @@ export async function processBug(
     const commentHtml = await marked(finalOutput);
     await deps.addWorkItemComment(config, bugId, commentHtml);
     log(`  Bug #${bugId}: Investigation posted as comment`);
+    safeRecordCost(deps, config, bugId, title, spend, 'completed');
 
     return { bugId, investigated: true };
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
     log(`  Bug #${bugId}: Error — ${errorMsg}`);
+    safeRecordCost(deps, config, bugId, title, spend, 'failed');
     return { bugId, investigated: false, error: errorMsg };
   }
 }

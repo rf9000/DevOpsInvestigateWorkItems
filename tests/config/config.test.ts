@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { join } from "path";
 import { loadConfig } from "../../src/config/index.ts";
 
 const validEnv: Record<string, string> = {
@@ -141,5 +142,17 @@ describe("loadConfig", () => {
     const env = { ...validEnv, AZURE_DEVOPS_ORG: "contoso" };
     const config = loadConfig(env);
     expect(config.orgUrl).toBe("https://dev.azure.com/contoso");
+  });
+});
+
+describe('cost ledger config', () => {
+  it('defaults COST_LOG_PATH to cost-ledger.jsonl inside STATE_DIR', () => {
+    const config = loadConfig({ ...validEnv, STATE_DIR: 'data' });
+    expect(config.costLogPath).toBe(join('data', 'cost-ledger.jsonl'));
+  });
+
+  it('uses COST_LOG_PATH when set', () => {
+    const config = loadConfig({ ...validEnv, COST_LOG_PATH: '/var/log/spend.jsonl' });
+    expect(config.costLogPath).toBe('/var/log/spend.jsonl');
   });
 });

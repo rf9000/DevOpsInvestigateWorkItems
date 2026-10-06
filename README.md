@@ -90,6 +90,7 @@ The service runs as a Docker container on an Azure VM. Target repositories and t
 | `SKILLS_DIR` | .claude/commands | Directory containing skill `.md` files loaded into the agent |
 | `ASSIGNED_TO_FILTER` | *(all)* | Comma-separated names to filter bugs by assignee |
 | `STATE_DIR` | .state | State file directory |
+| `COST_LOG_PATH` | `<STATE_DIR>/cost-ledger.jsonl` | Cost ledger: one JSON line per processed work item with outcome, USD and per-step token spend. Same format as DevOpsCoder's ledger. Dry runs never write to it |
 
 ## Commands
 

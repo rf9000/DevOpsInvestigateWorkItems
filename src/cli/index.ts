@@ -35,6 +35,7 @@ Environment variables:
   PROMPT_PATH                 Path to prompt file (default: src/prompts/investigate-bug.md)
   REINVESTIGATE_TAG           Tag that triggers reinvestigation (default: agent investigate)
   STATE_DIR                   State directory (default: .state)
+  COST_LOG_PATH               Cost ledger JSONL (default: <STATE_DIR>/cost-ledger.jsonl)
 `.trim();
 
 const command = process.argv[2];

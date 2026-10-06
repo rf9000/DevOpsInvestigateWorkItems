@@ -22,6 +22,7 @@ function mockConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     claudeModel: 'claude-sonnet-4-6',
     promptPath: './prompt.md',
     stateDir: '.state',
+    costLogPath: '.state/cost-ledger.jsonl',
     dryRun: false,
     ...overrides,
   };
