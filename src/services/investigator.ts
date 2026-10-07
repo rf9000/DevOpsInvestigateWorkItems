@@ -1,6 +1,6 @@
 import { readFileSync } from 'fs';
 import { query } from '@anthropic-ai/claude-agent-sdk';
-import type { PermissionResult, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
+import type { HookCallback, PermissionResult, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages/messages';
 import type { AppConfig, ImageAttachment } from '../types/index.ts';
 import type { DiscoveredSkill } from './skill-loader.ts';
@@ -44,6 +44,24 @@ export async function canUseTool(
   }
   return { behavior: 'allow' };
 }
+
+/**
+ * The deny list as a PreToolUse hook. With permissionMode 'bypassPermissions'
+ * the SDK approves every tool call before canUseTool is consulted, so only a
+ * hook actually stops a destructive command.
+ */
+export const denyDestructiveBash: HookCallback = async (input) => {
+  if (input.hook_event_name !== 'PreToolUse') return {};
+  const decision = await canUseTool(input.tool_name, (input.tool_input ?? {}) as Record<string, unknown>);
+  if (decision.behavior !== 'deny') return {};
+  return {
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason: decision.message,
+    },
+  };
+};
 
 export interface InvestigationContext {
   bugTitle: string;
@@ -124,7 +142,7 @@ export async function investigateBug(
       disallowedTools: ['Edit', 'Write', 'NotebookEdit'],
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
-      canUseTool,
+      hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [denyDestructiveBash] }] },
       systemPrompt: {
         type: 'preset',
         preset: 'claude_code',

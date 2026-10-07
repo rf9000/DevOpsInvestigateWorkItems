@@ -23,6 +23,15 @@ export interface WorkItemResponse {
   fields: Record<string, unknown>;
   rev: number;
   url: string;
+  /** Present when fetched with `$expand=all` or `$expand=relations`. */
+  relations?: WorkItemRelation[];
+}
+
+/** A link from a work item to another work item or an artifact (commit, PR, ...). */
+export interface WorkItemRelation {
+  rel: string;
+  url: string;
+  attributes?: Record<string, unknown>;
 }
 
 /** Persisted state tracking which bugs have already been processed. */

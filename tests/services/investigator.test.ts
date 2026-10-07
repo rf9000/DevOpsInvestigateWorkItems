@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { buildUserPrompt, buildUserMessage, buildSystemPrompt, canUseTool, looksLikeReport } from '../../src/services/investigator.ts';
+import { buildUserPrompt, buildUserMessage, buildSystemPrompt, canUseTool, denyDestructiveBash, looksLikeReport } from '../../src/services/investigator.ts';
 import type { InvestigationContext } from '../../src/services/investigator.ts';
 import type { DiscoveredSkill } from '../../src/services/skill-loader.ts';
 import { writeFileSync, mkdtempSync } from 'fs';
@@ -285,5 +285,32 @@ describe('looksLikeReport', () => {
   test('returns false with only 1 header', () => {
     const oneHeader = `### Bug Validity\nYes, this is a bug.`;
     expect(looksLikeReport(oneHeader)).toBe(false);
+  });
+});
+
+// permissionMode 'bypassPermissions' approves tool calls before canUseTool is
+// consulted, so the deny list is enforced through a PreToolUse hook instead.
+describe('denyDestructiveBash hook', () => {
+  const signal = new AbortController().signal;
+  const call = (tool_name: string, tool_input: unknown) =>
+    denyDestructiveBash(
+      {
+        hook_event_name: 'PreToolUse', tool_name, tool_input, tool_use_id: 't1',
+        session_id: 's', transcript_path: '', cwd: '',
+      } as Parameters<typeof denyDestructiveBash>[0],
+      't1',
+      { signal },
+    );
+
+  test('denies a destructive bash command with a reason', async () => {
+    const out = await call('Bash', { command: 'git push origin main' });
+    expect(out).toMatchObject({
+      hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny' },
+    });
+  });
+
+  test('leaves read-only bash and other tools alone', async () => {
+    expect(await call('Bash', { command: 'git log --oneline -5' })).toEqual({});
+    expect(await call('Read', { file_path: 'x' })).toEqual({});
   });
 });

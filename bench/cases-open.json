@@ -1,0 +1,76 @@
+[
+  {
+    "id": 76656,
+    "title": "Investigation of handling facilitating Banks (Example: communication with Swedbank through Sydbank)",
+    "source": "none",
+    "baseCommit": "5646a003dafa459037627e3d564b21e5c253f11b",
+    "fixFiles": [],
+    "fixLinks": []
+  },
+  {
+    "id": 72554,
+    "title": "Assisted Setup for Security ask the same question twice",
+    "source": "none",
+    "baseCommit": "5646a003dafa459037627e3d564b21e5c253f11b",
+    "fixFiles": [],
+    "fixLinks": []
+  },
+  {
+    "id": 83646,
+    "title": "Banks API",
+    "source": "none",
+    "baseCommit": "5646a003dafa459037627e3d564b21e5c253f11b",
+    "fixFiles": [],
+    "fixLinks": []
+  },
+  {
+    "id": 82318,
+    "title": "Shared authentication leaves target company's bank accounts Not Ready",
+    "source": "pr",
+    "baseCommit": "02b49ea4e1fae478761c0703393a3ed0988a61b0",
+    "fixFiles": [
+      "/base-application-test/Authentication/TestApplyBankAccData.Codeunit.al",
+      "/base-application-test/Authentication/TestAuthGrantedAcc.Codeunit.al",
+      "/base-application-test/Communication/BANKSapi/TestBANKSapiAuth.Codeunit.al",
+      "/base-application/Authentication/Codeunit/AuthShareCopyHook.Codeunit.al",
+      "/base-application/Authentication/Codeunit/AuthShareService.Codeunit.al",
+      "/base-application/Authentication/Codeunit/AuthGrantedAccMgt.Codeunit.al",
+      "/base-application/Authentication/Tables/AuthGrantedAccount.Table.al",
+      "/base-application/Bank Communication/Codeunits/Authentication/BANKSapiAuthEBICS.Codeunit.al",
+      "/base-application/Bank Communication/Codeunits/Authentication/BnkApiPSD2ApplyBnkAcc.Codeunit.al",
+      "/base-application/Authentication/Codeunit/Authentication.Codeunit.al",
+      "/base-application/Bank Communication/Codeunits/Authentication/BANKSapiAuthHelper.Codeunit.al",
+      "/base-application/Bank Communication/Codeunits/Authentication/BANKSapiAuth.Codeunit.al",
+      "/base-application/Bank Communication/Codeunits/Authentication/BnkApiEBICSApplyBnkAcc.Codeunit.al",
+      "/base-application/Bank Communication/Codeunits/Authentication/BankAccExternalID.Codeunit.al",
+      "/base-application/Bank Communication/Interfaces/IApplyBankAccData.Interface.al",
+      "/base-application/PermissionSets/Read.PermissionSetExt.al",
+      "/base-application/PermissionSets/Edit.PermissionSetExt.al",
+      "/base-application/Bank Communication/Codeunits/Authentication/DefApplyBankAccData.Codeunit.al",
+      "/base-application/PermissionSets/Admin.PermissionSetExt.al",
+      "/base-application/Bank Communication/Enums/CommunicationType.Enum.al",
+      "/base-application/Authentication/Pages/AuthShareWizTargets.Page.al",
+      "/base-application/app.json"
+    ],
+    "fixLinks": [
+      "pr:54906",
+      "pr:57226"
+    ]
+  },
+  {
+    "id": 80684,
+    "title": "Update status error on one line breaks the process for all lines",
+    "source": "none",
+    "baseCommit": "5646a003dafa459037627e3d564b21e5c253f11b",
+    "fixFiles": [],
+    "fixLinks": []
+  },
+  {
+    "id": 84342,
+    "title": "Translated fixed texts in Banking Templates",
+    "source": "none",
+    "baseCommit": "5646a003dafa459037627e3d564b21e5c253f11b",
+    "fixFiles": [],
+    "fixLinks": []
+  }
+]

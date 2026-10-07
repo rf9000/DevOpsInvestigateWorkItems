@@ -28,10 +28,20 @@ export async function adoFetch<T>(
     ...(options?.headers as Record<string, string> | undefined),
   };
 
+  // ADO answers a rejected PAT with a redirect to its sign-in page; followed,
+  // that page arrives as 200 HTML and fails later as a confusing JSON error.
   const res = await fetch(url, {
     ...options,
     headers,
+    redirect: 'manual',
   });
+
+  if (res.status >= 300 && res.status < 400) {
+    throw new AzureDevOpsError(
+      `Azure DevOps rejected the credentials (redirect to ${res.headers.get('location')?.split('?')[0] ?? 'sign-in'}); check AZURE_DEVOPS_PAT`,
+      401,
+    );
+  }
 
   if (!res.ok) {
     const body = await res.text();
@@ -79,6 +89,11 @@ export async function adoFetchWithRetry<T>(
   }
 
   throw new Error('adoFetchWithRetry: unexpected code path');
+}
+
+/** Escape a value for use inside a single-quoted WIQL string literal. */
+export function escapeWiql(value: string): string {
+  return value.replace(/'/g, "''");
 }
 
 export async function getWorkItem(
@@ -312,7 +327,7 @@ export async function queryTaggedWorkItems(
   tag: string,
 ): Promise<number[]> {
   // Flat WIQL query across the entire project — not scoped to parent features
-  const wiql = `SELECT [System.Id] FROM WorkItems WHERE [System.WorkItemType] IN ('Bug', 'User Story') AND [System.State] NOT IN ('Resolved', 'Closed', 'Removed') AND [System.Tags] CONTAINS '${tag}'`;
+  const wiql = `SELECT [System.Id] FROM WorkItems WHERE [System.WorkItemType] IN ('Bug', 'User Story') AND [System.State] NOT IN ('Resolved', 'Closed', 'Removed') AND [System.Tags] CONTAINS '${escapeWiql(tag)}'`;
 
   const path = 'wit/wiql?api-version=7.0';
   const data = await adoFetchWithRetry<WiqlFlatResponse>(config, path, {
@@ -356,4 +371,130 @@ export async function addWorkItemComment(
     method: 'POST',
     body: JSON.stringify({ text: commentHtml }),
   });
+}
+
+// --- Benchmark helpers: closed bugs and the files their fixes changed ---
+
+export async function queryClosedBugsUnderFeatures(
+  config: AppConfig,
+  featureIds: number[],
+): Promise<number[]> {
+  const idList = featureIds.join(',');
+  const wiql = `SELECT [System.Id] FROM WorkItemLinks WHERE [Source].[System.Id] IN (${idList}) AND [Target].[System.WorkItemType] = 'Bug' AND [Target].[System.State] IN ('Resolved', 'Closed') MODE (MustContain)`;
+
+  const data = await adoFetchWithRetry<WiqlResponse>(config, 'wit/wiql?api-version=7.0', {
+    method: 'POST',
+    body: JSON.stringify({ query: wiql }),
+  });
+
+  const featureIdSet = new Set(featureIds);
+  const ids = (data.workItemRelations ?? [])
+    .map((rel) => rel.target?.id)
+    .filter((id): id is number => !!id && !featureIdSet.has(id));
+  return [...new Set(ids)];
+}
+
+export async function getWorkItemsWithRelations(
+  config: AppConfig,
+  ids: number[],
+): Promise<WorkItemResponse[]> {
+  const items: WorkItemResponse[] = [];
+  const chunkSize = 200;
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const chunk = ids.slice(i, i + chunkSize).join(',');
+    const path = `wit/workitems?ids=${chunk}&$expand=relations&api-version=7.0`;
+    const data = await adoFetchWithRetry<{ value: WorkItemResponse[] }>(config, path);
+    items.push(...(data.value ?? []));
+  }
+  return items;
+}
+
+// Artifact links carry project and repo GUIDs; a linked repo may live in
+// another project, so git calls are scoped to the project from the link.
+function inProject(config: AppConfig, project: string): AppConfig {
+  return { ...config, project };
+}
+
+export interface GitRepository {
+  id: string;
+  name: string;
+}
+
+export async function getRepository(
+  config: AppConfig,
+  project: string,
+  repoId: string,
+): Promise<GitRepository> {
+  return adoFetchWithRetry<GitRepository>(
+    inProject(config, project),
+    `git/repositories/${repoId}?api-version=7.0`,
+  );
+}
+
+export interface GitPullRequest {
+  status: string;
+  lastMergeTargetCommit?: { commitId: string };
+  lastMergeCommit?: { commitId: string };
+}
+
+export async function getPullRequest(
+  config: AppConfig,
+  project: string,
+  repoId: string,
+  prId: number,
+): Promise<GitPullRequest> {
+  return adoFetchWithRetry<GitPullRequest>(
+    inProject(config, project),
+    `git/repositories/${repoId}/pullRequests/${prId}?api-version=7.0`,
+  );
+}
+
+interface GitChangeItem {
+  path?: string;
+  isFolder?: boolean;
+  gitObjectType?: string;
+}
+
+function filePaths(changes: Array<{ item?: GitChangeItem }>): string[] {
+  return changes
+    .map((c) => c.item)
+    .filter((item): item is GitChangeItem & { path: string } =>
+      !!item?.path && !item.isFolder && item.gitObjectType !== 'tree')
+    .map((item) => item.path);
+}
+
+export async function getPullRequestChangedFiles(
+  config: AppConfig,
+  project: string,
+  repoId: string,
+  prId: number,
+): Promise<string[]> {
+  const scoped = inProject(config, project);
+  const base = `git/repositories/${repoId}/pullRequests/${prId}/iterations`;
+  const iterations = await adoFetchWithRetry<{ value: Array<{ id: number }> }>(
+    scoped,
+    `${base}?api-version=7.0`,
+  );
+  const last = Math.max(...(iterations.value ?? []).map((it) => it.id));
+  if (!Number.isFinite(last)) return [];
+
+  // compareTo defaults to 0: the full diff against the common commit.
+  const changes = await adoFetchWithRetry<{ changeEntries: Array<{ item?: GitChangeItem }> }>(
+    scoped,
+    `${base}/${last}/changes?$top=2000&api-version=7.0`,
+  );
+  return filePaths(changes.changeEntries ?? []);
+}
+
+export async function getCommitChangedFiles(
+  config: AppConfig,
+  project: string,
+  repoId: string,
+  commitId: string,
+): Promise<string[]> {
+  const data = await adoFetchWithRetry<{ changes: Array<{ item?: GitChangeItem }> }>(
+    inProject(config, project),
+    `git/repositories/${repoId}/commits/${commitId}/changes?$top=2000&api-version=7.0`,
+  );
+  return filePaths(data.changes ?? []);
 }

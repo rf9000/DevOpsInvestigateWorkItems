@@ -1,0 +1,174 @@
+[
+  {
+    "id": 76375,
+    "title": "Remittance Adivce - can exceed max. length/remove space after line break",
+    "source": "pr",
+    "baseCommit": "84d10cc7f067f8d52926d7c25496cee4747b58b3",
+    "fixFiles": [
+      "/base-application/Templates/Codeunits/TemplateMgt.Codeunit.al",
+      "/base-application/Templates/Tables/TemplateFieldProp.Table.al"
+    ],
+    "fixLinks": [
+      "commit:4da65dddb7b2a9f4fbd739d04d95ac0224cd658c",
+      "commit:33ed923b35c2c02e0630a2614935dafb13743e70",
+      "commit:e371fdbeb6f53cb70ee0da0ecd43dece08530b38",
+      "pr:45847",
+      "commit:dd93b879c2c057dc1b29c5c6978f758bd19b6d8e",
+      "commit:0aaa934f27c2329791f8c436927423bb3dc4a0ba",
+      "commit:1a3a2931b5cc83fca637e0e7d8cb204a864ad3ca"
+    ]
+  },
+  {
+    "id": 76168,
+    "title": "Rebuild remittance not build correctly discount values",
+    "source": "pr",
+    "baseCommit": "bcb83bf15923e94b58e2ceeee1012b21382a035c",
+    "fixFiles": [
+      "/export/Payment Suggestion/Codeunits/EntryCollectionMgt.Codeunit.al",
+      "/export/Payment Suggestion/Codeunits/RemInfoLifecycle.Codeunit.al"
+    ],
+    "fixLinks": [
+      "pr:45570",
+      "commit:3498acff7a6ccdc0b5faa67b8e20ad315fef4be5",
+      "commit:0fd540a0becdb424943720733eeedf16d24b9cd3",
+      "commit:d0e72dafeccf5df833691b6f10a21e50aa1b9527"
+    ]
+  },
+  {
+    "id": 75907,
+    "title": "Rebuild remittance advice in advanced mode ignores Templates on the Suggestion head if Pmt. Information setup exists.",
+    "source": "pr",
+    "baseCommit": "5fa2f0237ba616ba6de7969725d79fa7dfffc584",
+    "fixFiles": [
+      "/export/Payment Suggestion/Codeunits/RemittanceCalcMgt.Codeunit.al"
+    ],
+    "fixLinks": [
+      "pr:44940",
+      "commit:6c1fdf25602a41c980bd4dd8d8da8c8a7c417d71"
+    ]
+  },
+  {
+    "id": 75906,
+    "title": "Rebuilding advice on journal lines puts all remittance info into one line.",
+    "source": "pr",
+    "baseCommit": "3f2d41c008f0368dd78bc529ae52a1988989fa6d",
+    "fixFiles": [
+      "/export/Direct Debit/Pages/DirectDebitJournal.Page.al",
+      "/export/General/PageExtensions/PaymentJournal.PageExt.al",
+      "/export/General/TableExtensions/GenJournalLine.TableExt.al",
+      "/export/Payment Suggestion/Codeunits/RemInfoLifecycle.Codeunit.al"
+    ],
+    "fixLinks": [
+      "pr:45351",
+      "commit:78c8d17c890f237b439de58b5d859398e95b18be",
+      "commit:07455f434536491a7f95231f6e3e1d4151f609b2",
+      "commit:f4564d658dd5e1f0601d9e497d3384d0628dafd1"
+    ]
+  },
+  {
+    "id": 75891,
+    "title": "Security Setup - Only DD Journals visible",
+    "source": "pr",
+    "baseCommit": "17159adef45ab6ad1e36d36992a609c058898cca",
+    "fixFiles": [
+      "/export/General/Pages/PaymentJournalSetup.Page.al",
+      "/export/Payment Approval/Pages/PaymentApprovalSetup.Page.al",
+      "/export/Payment Approval/Pages/PaymentJournalBatches.Page.al"
+    ],
+    "fixLinks": [
+      "commit:b3346acffbd2a6cbf6cb1a173d5d381a0460057b",
+      "commit:7904bceeb50e4c7cf527717a479a00f239057d0a",
+      "pr:44905",
+      "commit:10e13b44e37911a51ce0960557ef63629392c8f1",
+      "commit:df2779783ddd49984e8291cb93079e77084c5e79"
+    ]
+  },
+  {
+    "id": 75888,
+    "title": "Unapply entries from Payment not removed \"Export to File\" which occurs that open ledgers can´t be suggested",
+    "source": "pr",
+    "baseCommit": "e9c8635ea34d0c6a6ff60e498991201136f4b9fa",
+    "fixFiles": [
+      "/export/Entry Status/EntryStatusMgt.Codeunit.al",
+      "/export/Entry Status/EntryStatusSubs.Codeunit.al",
+      "/export/Payment Export/Codeunits/ExportGroup.Codeunit.al"
+    ],
+    "fixLinks": [
+      "commit:aa861fae8962c1cd74a3b537964c5c369786e528",
+      "commit:6532505f2a9b68249e6c033537a8f784b50afc0d",
+      "pr:45537",
+      "commit:60d89f7d885ed7e4d97a36025edd45f798a0c16c"
+    ]
+  },
+  {
+    "id": 75717,
+    "title": "Wrong validation rule triggered for Direct Debit (DDEBIT) during Sales Invoice validation",
+    "source": "pr",
+    "baseCommit": "b5819dab6635eb971cc08e46d92ab6b88096d45e",
+    "fixFiles": [
+      "/base-application-test/Export/Payment Entry Management/PaymentEntryMgtTest.Codeunit.al",
+      "/export/Payment Validation/Codeunits/CreateAndValSales.Codeunit.al"
+    ],
+    "fixLinks": [
+      "commit:b5427472224452a0c855d59b4d9a786d306d27ba",
+      "commit:1ff50d09c703996b5232c2857caa91bb25b20f59",
+      "commit:21fc6024f29cac33a2ace7b473dee53a6ec3ece6",
+      "commit:789c81bd9ee981550123d06e535e8c43bfc21246",
+      "pr:44787"
+    ]
+  },
+  {
+    "id": 75568,
+    "title": "Create Vendor Bank Account with no Code -> Cannot delete Journal lines...",
+    "source": "pr",
+    "baseCommit": "4ce384065db3ad6ae3f6d8617b1b0c7122ea96c9",
+    "fixFiles": [
+      "/export/General/PageExtensions/CustomerBankAccount.PageExt.al",
+      "/export/General/PageExtensions/EmployeeCard.PageExt.al",
+      "/export/General/PageExtensions/VendorBankAccount.PageExt.al"
+    ],
+    "fixLinks": [
+      "pr:44532",
+      "commit:9919ac3a2d6b300bdd788eca9b255fd88d2d6192",
+      "commit:6d118c64284744fa931e26de84d64af3a91af7e5",
+      "commit:e2bbff1a33d007579b4aed666481046e3c1c148b"
+    ]
+  },
+  {
+    "id": 75357,
+    "title": "Pay-to Vendor Bank Account is not updated after changing Vendor on Purchase Invoice",
+    "source": "pr",
+    "baseCommit": "2ae2a91a8d85b7ef536bf8da9b372aa7bf0e81cc",
+    "fixFiles": [
+      "/export/General/TableExtensions/PurchaseHeader.TableExt.al",
+      "/export/General/TableExtensions/SalesHeader.TableExt.al"
+    ],
+    "fixLinks": [
+      "commit:bfb711e5265cfafd2420e94464f9eed4d49c64ab",
+      "pr:44398",
+      "commit:452be33a4d726cc4bd7885baaa3187451d05bf40",
+      "commit:d8722df5eb9139756945e37a808c67e00202670c",
+      "commit:0838dc5d5cf6ccfd3887b52b922b40af8becf3bf",
+      "commit:2a7b6895d9918d0d08d405f3619e719f26398c09"
+    ]
+  },
+  {
+    "id": 74625,
+    "title": "Error in the payment journal stating: Bank Acount '' does not exist",
+    "source": "pr",
+    "baseCommit": "bccefbd7821763ae4c38f666e96f716dd5640a68",
+    "fixFiles": [
+      "/banking-se/Codeunit/BankAccVerification.Codeunit.al",
+      "/export/General/TableExtensions/GenJournalLine.TableExt.al",
+      "/export-test/Libraries/LibraryExportSetup.Codeunit.al"
+    ],
+    "fixLinks": [
+      "pr:44129",
+      "commit:492f7a414c45b7cb223f38a93630c09a09935de0",
+      "commit:383b22c18d337286e9fffb6adb8ab0d0d1254279",
+      "commit:bed8f4344249a7d02c170ea8b8d9ae12d9924f77",
+      "commit:0bed41269b170637c1985b36a24ed3b3495d68d0",
+      "commit:0e770655b3d69e93c835b781833ad2efcccffa6f"
+    ]
+  }
+]

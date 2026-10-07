@@ -1,6 +1,6 @@
 import { describe, test, expect, mock } from 'bun:test';
 import type { AppConfig, CallSpend, CostRecord, ImageAttachment } from '../../src/types/index.ts';
-import { processBug } from '../../src/services/processor.ts';
+import { processBug, runPipeline } from '../../src/services/processor.ts';
 import type { ProcessorDeps } from '../../src/services/processor.ts';
 import type { InvestigationContext } from '../../src/services/investigator.ts';
 import type { SpendSink } from '../../src/services/spend-tracker.ts';
@@ -433,5 +433,43 @@ describe('processBug cost ledger', () => {
     const result = await processBug(mockConfig(), 100, deps);
 
     expect(result).toEqual({ bugId: 100, investigated: false, error: 'agent crashed' });
+  });
+});
+
+describe('runPipeline', () => {
+  test('returns the rendered markdown and spend without posting or recording', async () => {
+    const config = mockConfig();
+    const deps = makeDeps({
+      investigateBug: mock((_c: AppConfig, _ctx: InvestigationContext, onSpend?: SpendSink) => {
+        onSpend?.({
+          usd: 1.5, inputTokens: 10, outputTokens: 5, cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 0, turns: 7, models: ['claude-opus-5-5'],
+        });
+        return Promise.resolve('preamble\n### Bug Validity\nYes\n\n### Root Cause\nX.');
+      }),
+    });
+
+    const result = await runPipeline(config, 100, deps);
+
+    expect(result.outcome).toBe('completed');
+    expect(result.title).toBe('Login crashes on expired token');
+    expect(result.markdown!.startsWith('### Bug Validity')).toBe(true);
+    expect(result.markdown).toContain('agent investigate');
+    expect(result.spend.totalUsd()).toBe(1.5);
+    expect(result.spend.snapshot().investigate!.turns).toBe(7);
+    expect(deps.addWorkItemComment).not.toHaveBeenCalled();
+    expect(deps.recordCost).not.toHaveBeenCalled();
+  });
+
+  test('reports failure instead of throwing when the investigation errors', async () => {
+    const deps = makeDeps({
+      investigateBug: mock(() => Promise.reject(new Error('boom'))),
+    });
+
+    const result = await runPipeline(mockConfig(), 100, deps);
+
+    expect(result.outcome).toBe('failed');
+    expect(result.error).toBe('boom');
+    expect(result.markdown).toBeUndefined();
   });
 });

@@ -7,8 +7,11 @@
     "start": "bun run src/cli/index.ts watch",
     "once": "bun run src/cli/index.ts run-once",
     "run-bug": "bun run src/cli/index.ts run-bug",
+    "bench:collect": "bun run src/bench/cli.ts collect",
+    "bench:run": "bun run src/bench/cli.ts run",
+    "bench:report": "bun run src/bench/cli.ts report",
     "test": "bun test --preload ./tests/setup.ts tests/**/*.test.ts",
-    "test:unit": "bun test --preload ./tests/setup.ts ./tests/config/ ./tests/sdk/ ./tests/state/ ./tests/services/",
+    "test:unit": "bun test --preload ./tests/setup.ts ./tests/config/ ./tests/sdk/ ./tests/state/ ./tests/services/ ./tests/bench/ ./tests/utils/",
     "test:integration": "bun test --preload ./tests/setup.ts tests/integration/**/*.test.ts",
     "typecheck": "tsc --noEmit"
   },

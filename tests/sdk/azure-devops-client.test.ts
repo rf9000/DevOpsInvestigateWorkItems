@@ -12,6 +12,12 @@ import {
   removeTagFromWorkItem,
   addWorkItemComment,
   downloadAttachment,
+  queryClosedBugsUnderFeatures,
+  getWorkItemsWithRelations,
+  getRepository,
+  getPullRequest,
+  getPullRequestChangedFiles,
+  getCommitChangedFiles,
 } from '../../src/sdk/azure-devops-client.ts';
 
 const originalFetch = globalThis.fetch;
@@ -743,5 +749,133 @@ describe('error handling', () => {
       expect(adoErr.name).toBe('AzureDevOpsError');
       expect(adoErr.message).toContain('404');
     }
+  });
+});
+
+describe('queryClosedBugsUnderFeatures', () => {
+  test('queries resolved/closed bugs under features and drops the feature ids', async () => {
+    setMockFetch({
+      workItemRelations: [
+        { target: { id: 12345 } },
+        { target: { id: 700 } },
+        { target: { id: 701 } },
+        { target: { id: 700 } },
+      ],
+    });
+
+    const result = await queryClosedBugsUnderFeatures(mockConfig(), [12345]);
+
+    expect(result).toEqual([700, 701]);
+    const body = JSON.parse((mockFn.mock.calls[0]![1] as RequestInit).body as string) as { query: string };
+    expect(body.query).toContain("[Target].[System.WorkItemType] = 'Bug'");
+    expect(body.query).toContain("[Target].[System.State] IN ('Resolved', 'Closed')");
+  });
+});
+
+describe('getWorkItemsWithRelations', () => {
+  test('batch-fetches with relations expanded, in chunks of 200', async () => {
+    setMockFetch({ value: [{ id: 1, fields: {}, rev: 1, url: 'u', relations: [] }] });
+    const ids = Array.from({ length: 250 }, (_, i) => i + 1);
+
+    const result = await getWorkItemsWithRelations(mockConfig(), ids);
+
+    expect(mockFn).toHaveBeenCalledTimes(2);
+    expect(String(mockFn.mock.calls[0]![0])).toContain('$expand=relations');
+    expect(result).toHaveLength(2);
+  });
+
+  test('returns empty array without calling the API for no ids', async () => {
+    setMockFetch({ value: [] });
+    expect(await getWorkItemsWithRelations(mockConfig(), [])).toEqual([]);
+    expect(mockFn).toHaveBeenCalledTimes(0);
+  });
+});
+
+describe('git helpers', () => {
+  test('getRepository uses the given project instead of the configured one', async () => {
+    setMockFetch({ id: 'repo-guid', name: 'Continia Banking' });
+
+    const repo = await getRepository(mockConfig(), 'proj-guid', 'repo-guid');
+
+    expect(repo.name).toBe('Continia Banking');
+    expect(String(mockFn.mock.calls[0]![0])).toBe(
+      'https://dev.azure.com/my-org/proj-guid/_apis/git/repositories/repo-guid?api-version=7.0',
+    );
+  });
+
+  test('getPullRequestChangedFiles reads the last iteration and drops folders', async () => {
+    setSequentialMockFetch(
+      { body: { value: [{ id: 1 }, { id: 3 }, { id: 2 }] } },
+      {
+        body: {
+          changeEntries: [
+            { item: { path: '/app/src/A.al' } },
+            { item: { path: '/app/src', isFolder: true } },
+            { item: { path: '/app/src/B.al', gitObjectType: 'blob' } },
+            { item: { path: '/app/tree', gitObjectType: 'tree' } },
+          ],
+        },
+      },
+    );
+
+    const files = await getPullRequestChangedFiles(mockConfig(), 'p', 'r', 42);
+
+    expect(files).toEqual(['/app/src/A.al', '/app/src/B.al']);
+    expect(String(mockFn.mock.calls[1]![0])).toContain('pullRequests/42/iterations/3/changes');
+  });
+
+  test('getPullRequest returns the merge target commit', async () => {
+    setMockFetch({ status: 'completed', lastMergeTargetCommit: { commitId: 'abc' } });
+
+    const pr = await getPullRequest(mockConfig(), 'p', 'r', 42);
+
+    expect(pr.lastMergeTargetCommit?.commitId).toBe('abc');
+  });
+
+  test('getCommitChangedFiles returns blob paths', async () => {
+    setMockFetch({
+      changes: [
+        { item: { path: '/x/A.cs', gitObjectType: 'blob' } },
+        { item: { path: '/x', gitObjectType: 'tree' } },
+      ],
+    });
+
+    const files = await getCommitChangedFiles(mockConfig(), 'p', 'r', 'sha1');
+
+    expect(files).toEqual(['/x/A.cs']);
+    expect(String(mockFn.mock.calls[0]![0])).toContain('commits/sha1/changes');
+  });
+});
+
+describe('WIQL escaping', () => {
+  test('queryTaggedWorkItems escapes single quotes in the tag', async () => {
+    setMockFetch({ workItems: [] });
+
+    await queryTaggedWorkItems(mockConfig(), "bob's tag");
+
+    const body = JSON.parse((mockFn.mock.calls[0]![1] as RequestInit).body as string) as { query: string };
+    expect(body.query).toContain("CONTAINS 'bob''s tag'");
+  });
+});
+
+describe('rejected credentials', () => {
+  test('a sign-in redirect throws a 401 naming the PAT instead of parsing HTML', async () => {
+    mockFn = mock(() =>
+      Promise.resolve(
+        new Response('<html>Object moved</html>', {
+          status: 302,
+          headers: { Location: 'https://spsprodweu1.vssps.visualstudio.com/_signin?realm=x' },
+        }),
+      ),
+    );
+    globalThis.fetch = mockFn as unknown as typeof fetch;
+
+    const err = await getWorkItem(mockConfig(), 1).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(AzureDevOpsError);
+    expect((err as AzureDevOpsError).statusCode).toBe(401);
+    expect((err as AzureDevOpsError).message).toContain('AZURE_DEVOPS_PAT');
+    expect((err as AzureDevOpsError).message).not.toContain('realm');
+    expect(mockFn).toHaveBeenCalledTimes(1);
   });
 });

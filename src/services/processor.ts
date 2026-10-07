@@ -87,15 +87,27 @@ function safeRecordCost(
   }
 }
 
-export async function processBug(
+/** What one pipeline run produced. Nothing has been posted or recorded yet. */
+export interface PipelineResult {
+  outcome: 'completed' | 'failed';
+  /** Known once the work item is fetched; a failure before that has no title. */
+  title?: string;
+  /** The comment to post, as markdown. Only set when outcome is completed. */
+  markdown?: string;
+  error?: string;
+  spend: SpendTracker;
+}
+
+/**
+ * Fetch the work item, investigate it and render the comment. Has no side
+ * effects on Azure DevOps or the ledger, so the benchmark can replay it.
+ */
+export async function runPipeline(
   config: AppConfig,
   bugId: number,
   deps: ProcessorDeps = defaultDeps,
-): Promise<BugProcessResult> {
-  log(`Processing Bug #${bugId}...`);
-
+): Promise<PipelineResult> {
   const spend = createSpendTracker();
-  // Known once the work item is fetched; a failure before that records no title.
   let title: string | undefined;
 
   try {
@@ -160,9 +172,7 @@ export async function processBug(
     );
 
     if (!output || !output.trim()) {
-      log(`  Bug #${bugId}: Investigation returned empty result — skipping comment`);
-      safeRecordCost(deps, config, bugId, title, spend, 'failed');
-      return { bugId, investigated: false, error: 'Investigation returned empty result' };
+      return { outcome: 'failed', title, error: 'Investigation returned empty result', spend };
     }
 
     // Strip any preamble before first ### header
@@ -171,18 +181,41 @@ export async function processBug(
 
     // Append reinvestigate tag footer
     const footer = `\n\n---\n*If you want the agent to investigate again, tag the work item with: \`${config.reinvestigateTag}\`*`;
-    const finalOutput = cleanedOutput + footer;
 
-    if (config.dryRun) {
-      log(`  Bug #${bugId}: [DRY RUN] Investigation result:\n${finalOutput}`);
-      return { bugId, investigated: true };
-    }
+    return { outcome: 'completed', title, markdown: cleanedOutput + footer, spend };
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    return { outcome: 'failed', title, error: errorMsg, spend };
+  }
+}
 
-    const commentHtml = await marked(finalOutput);
+export async function processBug(
+  config: AppConfig,
+  bugId: number,
+  deps: ProcessorDeps = defaultDeps,
+): Promise<BugProcessResult> {
+  log(`Processing Bug #${bugId}...`);
+
+  const run = await runPipeline(config, bugId, deps);
+  const { title, spend } = run;
+
+  if (run.outcome === 'failed' || run.markdown === undefined) {
+    const errorMsg = run.error ?? 'unknown error';
+    log(`  Bug #${bugId}: Error — ${errorMsg}`);
+    safeRecordCost(deps, config, bugId, title, spend, 'failed');
+    return { bugId, investigated: false, error: errorMsg };
+  }
+
+  if (config.dryRun) {
+    log(`  Bug #${bugId}: [DRY RUN] Investigation result:\n${run.markdown}`);
+    return { bugId, investigated: true };
+  }
+
+  try {
+    const commentHtml = await marked(run.markdown);
     await deps.addWorkItemComment(config, bugId, commentHtml);
     log(`  Bug #${bugId}: Investigation posted as comment`);
     safeRecordCost(deps, config, bugId, title, spend, 'completed');
-
     return { bugId, investigated: true };
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
