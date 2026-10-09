@@ -10,12 +10,16 @@ const envSchema = z.object({
   TARGET_REPO_PATH: z.string().min(1, "TARGET_REPO_PATH is required"),
   MAX_INVESTIGATIONS_PER_DAY: z.coerce.number().default(5),
   POLL_INTERVAL_MINUTES: z.coerce.number().default(15),
-  CLAUDE_MODEL: z.string().default("claude-sonnet-4-6"),
+  CLAUDE_MODEL: z.string().default("claude-opus-5-5"),
   PROMPT_PATH: z.string().default("src/prompts/investigate-bug.md"),
   ASSIGNED_TO_FILTER: z.string().optional(),
   REINVESTIGATE_TAG: z.string().default("agent investigate"),
   STATE_DIR: z.string().default(".state"),
   COST_LOG_PATH: z.string().optional(),
+  PIPELINE_VARIANT: z.enum(["legacy", "triage"]).default("legacy"),
+  TRIAGE_MODEL: z.string().default("claude-haiku-5-5"),
+  TRIAGE_PROMPT_PATH: z.string().default("src/prompts/triage.md"),
+  DEEP_PROMPT_PATH: z.string().default("src/prompts/investigate-deep.md"),
 });
 
 export function loadConfig(
@@ -64,5 +68,9 @@ export function loadConfig(
     stateDir: parsed.STATE_DIR,
     costLogPath: parsed.COST_LOG_PATH ?? join(parsed.STATE_DIR, "cost-ledger.jsonl"),
     dryRun: false,
+    pipelineVariant: parsed.PIPELINE_VARIANT,
+    triageModel: parsed.TRIAGE_MODEL,
+    triagePromptPath: parsed.TRIAGE_PROMPT_PATH,
+    deepPromptPath: parsed.DEEP_PROMPT_PATH,
   };
 }

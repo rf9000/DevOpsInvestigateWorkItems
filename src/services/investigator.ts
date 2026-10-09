@@ -112,6 +112,7 @@ export async function investigateBug(
   config: AppConfig,
   context: InvestigationContext,
   onSpend?: SpendSink,
+  queryFn: typeof query = query,
 ): Promise<string> {
   const systemPrompt = buildSystemPrompt(config.promptPath, context.discoveredSkills);
 
@@ -130,10 +131,11 @@ export async function investigateBug(
 
   let result: string | undefined;
   let resultSubtype: string | undefined;
+  let apiError: string | undefined;
   const assistantTexts: string[] = [];
   let turnCount = 0;
 
-  for await (const message of query({
+  for await (const message of queryFn({
     prompt,
     options: {
       model: config.claudeModel,
@@ -165,7 +167,11 @@ export async function investigateBug(
       // Error and max-turn results still cost money, so record spend first.
       onSpend?.(spendFromAgentResult(message));
       resultSubtype = message.subtype;
-      if (message.subtype === 'success') {
+      if (message.subtype === 'success' && message.is_error) {
+        // An API error (bad model, auth, overload) arrives as a "success"
+        // whose text is the error message. It must never become the report.
+        apiError = message.result;
+      } else if (message.subtype === 'success') {
         result = message.result;
       } else if (message.subtype === 'error_max_turns') {
         console.error(`  Agent hit max turns (${turnCount}). Last assistant texts may contain a partial report.`);
@@ -173,6 +179,10 @@ export async function investigateBug(
         console.error(`  Agent ended with result subtype: ${message.subtype}`);
       }
     }
+  }
+
+  if (apiError !== undefined) {
+    throw new Error(`Claude API error: ${apiError}`);
   }
 
   // If no success result, try to salvage a report from assistant messages

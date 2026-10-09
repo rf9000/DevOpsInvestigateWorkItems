@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { buildUserPrompt, buildUserMessage, buildSystemPrompt, canUseTool, denyDestructiveBash, looksLikeReport } from '../../src/services/investigator.ts';
+import { buildUserPrompt, buildUserMessage, buildSystemPrompt, canUseTool, denyDestructiveBash, investigateBug, looksLikeReport } from '../../src/services/investigator.ts';
 import type { InvestigationContext } from '../../src/services/investigator.ts';
 import type { DiscoveredSkill } from '../../src/services/skill-loader.ts';
 import { writeFileSync, mkdtempSync } from 'fs';
@@ -312,5 +312,28 @@ describe('denyDestructiveBash hook', () => {
   test('leaves read-only bash and other tools alone', async () => {
     expect(await call('Bash', { command: 'git log --oneline -5' })).toEqual({});
     expect(await call('Read', { file_path: 'x' })).toEqual({});
+  });
+});
+
+describe('investigateBug result handling', () => {
+  const context = { bugTitle: 'T', bugDescription: '', bugReproSteps: '', discoveredSkills: [], images: [] };
+  const config = { claudeModel: 'm', promptPath: 'src/prompts/investigate-bug.md', targetRepoPath: '.' } as unknown as Parameters<typeof investigateBug>[0];
+
+  function fakeQuery(messages: unknown[]): typeof import('@anthropic-ai/claude-agent-sdk').query {
+    return (() => (async function* () { for (const m of messages) yield m; })()) as never;
+  }
+
+  function result(extra: Record<string, unknown>) {
+    return { type: 'result', subtype: 'success', is_error: false, total_cost_usd: 0, num_turns: 1, modelUsage: {}, usage: {}, ...extra };
+  }
+
+  test('an API error reported as a success result throws instead of becoming the report', async () => {
+    const query = fakeQuery([result({ is_error: true, result: 'API Error: 400 Claude Code 2.1.263 does not support this model' })]);
+    await expect(investigateBug(config, context, undefined, query)).rejects.toThrow('Claude API error: API Error: 400');
+  });
+
+  test('a normal success returns the report', async () => {
+    const query = fakeQuery([result({ result: '### Bug Validity\nYes\n### Root Cause\nX' })]);
+    expect(await investigateBug(config, context, undefined, query)).toContain('### Root Cause');
   });
 });

@@ -24,6 +24,10 @@ function mockConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     stateDir: '.state',
     costLogPath: '.state/cost-ledger.jsonl',
     dryRun: false,
+    pipelineVariant: 'legacy',
+    triageModel: 'claude-sonnet-5-5',
+    triagePromptPath: './triage.md',
+    deepPromptPath: './deep.md',
     ...overrides,
   };
 }

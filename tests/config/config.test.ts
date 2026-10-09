@@ -57,11 +57,20 @@ describe("loadConfig", () => {
 
     expect(config.pollIntervalMinutes).toBe(15);
     expect(config.maxInvestigationsPerDay).toBe(5);
-    expect(config.claudeModel).toBe("claude-sonnet-4-6");
+    expect(config.claudeModel).toBe("claude-opus-5-5");
     expect(config.promptPath).toBe("src/prompts/investigate-bug.md");
     expect(config.assignedToFilter).toEqual([]);
     expect(config.reinvestigateTag).toBe("agent investigate");
     expect(config.stateDir).toBe(".state");
+    expect(config.pipelineVariant).toBe("legacy");
+    expect(config.triageModel).toBe("claude-haiku-5-5");
+    expect(config.triagePromptPath).toBe("src/prompts/triage.md");
+    expect(config.deepPromptPath).toBe("src/prompts/investigate-deep.md");
+  });
+
+  it("accepts PIPELINE_VARIANT=triage and rejects unknown variants", () => {
+    expect(loadConfig({ ...validEnv, PIPELINE_VARIANT: "triage" }).pipelineVariant).toBe("triage");
+    expect(() => loadConfig({ ...validEnv, PIPELINE_VARIANT: "fancy" })).toThrow("Invalid configuration");
   });
 
   it("overrides defaults when optional vars are provided", () => {

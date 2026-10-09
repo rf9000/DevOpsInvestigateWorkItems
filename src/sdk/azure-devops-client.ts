@@ -1,7 +1,10 @@
 import type {
   AppConfig,
+  WorkItemComment,
   WorkItemResponse,
+  WorkItemSummary,
 } from '../types/index.ts';
+import { stripHtmlToText } from '../utils/html.ts';
 
 export class AzureDevOpsError extends Error {
   override readonly name = 'AzureDevOpsError';
@@ -370,6 +373,92 @@ export async function addWorkItemComment(
   return adoFetchWithRetry<CommentResponse>(config, path, {
     method: 'POST',
     body: JSON.stringify({ text: commentHtml }),
+  });
+}
+
+interface CommentsResponse {
+  comments?: Array<{
+    text?: string;
+    createdDate?: string;
+    createdBy?: { displayName?: string };
+  }>;
+}
+
+/** The newest `top` comments, oldest first, as plain text. */
+export async function getWorkItemComments(
+  config: AppConfig,
+  workItemId: number,
+  top = 10,
+): Promise<WorkItemComment[]> {
+  const path = `wit/workitems/${workItemId}/comments?$top=${top}&order=desc&api-version=7.0-preview.4`;
+  const data = await adoFetchWithRetry<CommentsResponse>(config, path);
+  return (data.comments ?? [])
+    .map((c) => ({
+      author: c.createdBy?.displayName ?? 'unknown',
+      createdDate: c.createdDate ?? '',
+      text: stripHtmlToText(c.text ?? ''),
+    }))
+    .reverse();
+}
+
+export interface SearchWorkItemsOptions {
+  /** Never return this item (the one being triaged). */
+  excludeId: number;
+  /** Only items created before this ISO time; replays use the bug's creation time. */
+  createdBefore?: string;
+  top?: number;
+}
+
+/**
+ * Work items whose title or description contain every keyword, newest first.
+ * For duplicate detection, so closed items are included.
+ */
+export async function searchWorkItems(
+  config: AppConfig,
+  keywords: string[],
+  options: SearchWorkItemsOptions,
+): Promise<WorkItemSummary[]> {
+  const words = keywords.map((k) => k.trim()).filter(Boolean).slice(0, 6);
+  if (words.length === 0) return [];
+
+  const terms = words.map((w) => {
+    const v = escapeWiql(w);
+    return `([System.Title] CONTAINS '${v}' OR [System.Description] CONTAINS WORDS '${v}')`;
+  });
+  const clauses = [
+    `[System.TeamProject] = @project`,
+    `[System.Id] <> ${options.excludeId}`,
+    `[System.WorkItemType] IN ('Bug', 'User Story', 'Feature', 'Task')`,
+    ...(options.createdBefore ? [`[System.CreatedDate] < '${escapeWiql(options.createdBefore)}'`] : []),
+    ...terms,
+  ];
+  const wiql = `SELECT [System.Id] FROM WorkItems WHERE ${clauses.join(' AND ')} ORDER BY [System.ChangedDate] DESC`;
+
+  const top = options.top ?? 20;
+  const data = await adoFetchWithRetry<WiqlFlatResponse>(
+    config,
+    `wit/wiql?$top=${top}&timePrecision=true&api-version=7.0`,
+    { method: 'POST', body: JSON.stringify({ query: wiql }) },
+  );
+  const ids = (data.workItems ?? []).map((w) => w.id).slice(0, top);
+  if (ids.length === 0) return [];
+
+  const fields = 'System.Title,System.WorkItemType,System.State,System.CreatedDate';
+  const items = await adoFetchWithRetry<WorkItemsBatchResponse>(
+    config,
+    `wit/workitems?ids=${ids.join(',')}&fields=${fields}&api-version=7.0`,
+  );
+  const byId = new Map((items.value ?? []).map((i) => [i.id, i]));
+  return ids.flatMap((id) => {
+    const item = byId.get(id);
+    if (!item) return [];
+    return [{
+      id,
+      title: String(item.fields['System.Title'] ?? ''),
+      type: String(item.fields['System.WorkItemType'] ?? ''),
+      state: String(item.fields['System.State'] ?? ''),
+      createdDate: String(item.fields['System.CreatedDate'] ?? ''),
+    }];
   });
 }
 

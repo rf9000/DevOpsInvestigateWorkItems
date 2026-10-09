@@ -15,6 +15,12 @@ export interface AppConfig {
   stateDir: string;
   costLogPath: string;
   dryRun: boolean;
+  /** Which pipeline handles a work item: one legacy pass, or triage then a deep dive. */
+  pipelineVariant: 'legacy' | 'triage';
+  /** Model for the cheap triage stage; the deep dive uses claudeModel. */
+  triageModel: string;
+  triagePromptPath: string;
+  deepPromptPath: string;
 }
 
 /** Response shape when fetching a single work item. */
@@ -32,6 +38,22 @@ export interface WorkItemRelation {
   rel: string;
   url: string;
   attributes?: Record<string, unknown>;
+}
+
+/** A comment on a work item, as plain text. */
+export interface WorkItemComment {
+  author: string;
+  createdDate: string;
+  text: string;
+}
+
+/** A work item found by a search, for duplicate detection. */
+export interface WorkItemSummary {
+  id: number;
+  title: string;
+  type: string;
+  state: string;
+  createdDate: string;
 }
 
 /** Persisted state tracking which bugs have already been processed. */
@@ -105,9 +127,11 @@ export interface CostRecord {
   /** The work item's System.Title, when it was fetched before the run ended. */
   title?: string;
   outcome: 'completed' | 'failed';
+  /** Pipeline that handled the item; absent in records written before triage existed. */
+  variant?: 'legacy' | 'triage';
   /** USD reported by the Agent SDK across the investigation pass(es). */
   costUsd: number;
-  /** Keyed by step; this bot currently records a single `investigate` step. */
+  /** Keyed by step: `investigate`, plus `triage` for the triage pipeline. */
   perStage: Record<string, StepSpend>;
 }
 

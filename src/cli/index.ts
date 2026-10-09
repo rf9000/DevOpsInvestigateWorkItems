@@ -31,7 +31,7 @@ Environment variables:
   TARGET_REPO_PATH            Local path to repository to investigate (required)
   POLL_INTERVAL_MINUTES       Polling interval (default: 15)
   MAX_INVESTIGATIONS_PER_DAY  Daily investigation limit (default: 5)
-  CLAUDE_MODEL                Claude model to use (default: claude-sonnet-4-6)
+  CLAUDE_MODEL                Claude model to use (default: claude-opus-5-5)
   PROMPT_PATH                 Path to prompt file (default: src/prompts/investigate-bug.md)
   REINVESTIGATE_TAG           Tag that triggers reinvestigation (default: agent investigate)
   STATE_DIR                   State directory (default: .state)

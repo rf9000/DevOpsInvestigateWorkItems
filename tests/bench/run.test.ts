@@ -11,7 +11,8 @@ function mockConfig(): AppConfig {
     featureWorkItemIds: [1], targetRepoPath: 'C:/repos/banking', maxInvestigationsPerDay: 5,
     assignedToFilter: [], reinvestigateTag: 'agent investigate', pollIntervalMinutes: 5,
     claudeModel: 'claude-opus-5-5', promptPath: './prompt.md', stateDir: '.state',
-    costLogPath: '.state/cost-ledger.jsonl', dryRun: false,
+    costLogPath: '.state/cost-ledger.jsonl', dryRun: false, pipelineVariant: 'legacy',
+    triageModel: 'claude-sonnet-5-5', triagePromptPath: './triage.md', deepPromptPath: './deep.md',
   };
 }
 

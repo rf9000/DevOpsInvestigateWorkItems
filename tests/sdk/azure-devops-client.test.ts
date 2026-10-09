@@ -18,6 +18,8 @@ import {
   getPullRequest,
   getPullRequestChangedFiles,
   getCommitChangedFiles,
+  getWorkItemComments,
+  searchWorkItems,
 } from '../../src/sdk/azure-devops-client.ts';
 
 const originalFetch = globalThis.fetch;
@@ -40,6 +42,10 @@ function mockConfig(): AppConfig {
     stateDir: '.state',
     costLogPath: '.state/cost-ledger.jsonl',
     dryRun: false,
+    pipelineVariant: 'legacy',
+    triageModel: 'claude-sonnet-5-5',
+    triagePromptPath: './triage.md',
+    deepPromptPath: './deep.md',
   };
 }
 
@@ -877,5 +883,55 @@ describe('rejected credentials', () => {
     expect((err as AzureDevOpsError).message).toContain('AZURE_DEVOPS_PAT');
     expect((err as AzureDevOpsError).message).not.toContain('realm');
     expect(mockFn).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('getWorkItemComments', () => {
+  test('returns the newest comments oldest first, as plain text', async () => {
+    setMockFetch({
+      comments: [
+        { text: '<p>second</p>', createdDate: '2026-01-02', createdBy: { displayName: 'Bo' } },
+        { text: '<p>first</p>', createdDate: '2026-01-01', createdBy: { displayName: 'Ann' } },
+      ],
+    });
+
+    const result = await getWorkItemComments(mockConfig(), 7, 10);
+
+    expect(result.map((c) => [c.author, c.text])).toEqual([['Ann', 'first'], ['Bo', 'second']]);
+    expect(String(mockFn.mock.calls[0]![0])).toContain('wit/workitems/7/comments?$top=10&order=desc');
+  });
+});
+
+describe('searchWorkItems', () => {
+  test('requires every keyword, excludes the item, applies the cutoff and keeps WIQL order', async () => {
+    setSequentialMockFetch(
+      { body: { workItems: [{ id: 9 }, { id: 8 }] } },
+      {
+        body: {
+          value: [
+            { id: 8, fields: { 'System.Title': 'B', 'System.WorkItemType': 'Bug', 'System.State': 'Closed', 'System.CreatedDate': 'c8' } },
+            { id: 9, fields: { 'System.Title': "A's", 'System.WorkItemType': 'User Story', 'System.State': 'New', 'System.CreatedDate': 'c9' } },
+          ],
+        },
+      },
+    );
+
+    const result = await searchWorkItems(mockConfig(), ["O'Brien", 'export', ' '], { excludeId: 5, createdBefore: '2026-01-01T00:00:00Z' });
+
+    expect(result.map((r) => r.id)).toEqual([9, 8]);
+    expect(result[0]).toEqual({ id: 9, title: "A's", type: 'User Story', state: 'New', createdDate: 'c9' });
+    expect(String(mockFn.mock.calls[0]![0])).toContain('timePrecision=true');
+    const body = JSON.parse((mockFn.mock.calls[0]![1] as RequestInit).body as string) as { query: string };
+    expect(body.query).toContain('[System.Id] <> 5');
+    expect(body.query).toContain("[System.CreatedDate] < '2026-01-01T00:00:00Z'");
+    expect(body.query).toContain("[System.Title] CONTAINS 'O''Brien'");
+    expect(body.query).toContain("[System.Description] CONTAINS WORDS 'export'");
+    expect(body.query).not.toContain("CONTAINS ' '");
+  });
+
+  test('no keywords means no API call', async () => {
+    setMockFetch({});
+    expect(await searchWorkItems(mockConfig(), ['  '], { excludeId: 1 })).toEqual([]);
+    expect(mockFn).toHaveBeenCalledTimes(0);
   });
 });

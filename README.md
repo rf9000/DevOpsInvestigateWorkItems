@@ -85,12 +85,16 @@ The service runs as a Docker container on an Azure VM. Target repositories and t
 |----------|---------|-------------|
 | `POLL_INTERVAL_MINUTES` | 15 | Polling interval in minutes |
 | `MAX_INVESTIGATIONS_PER_DAY` | 5 | Daily investigation limit |
-| `CLAUDE_MODEL` | claude-sonnet-4-6 | Claude model to use |
+| `CLAUDE_MODEL` | claude-opus-5-5 | Claude model for the investigation (legacy pass and triage deep dive) |
 | `PROMPT_PATH` | .claude/commands/do-process-item.md | Path to the investigation prompt |
 | `SKILLS_DIR` | .claude/commands | Directory containing skill `.md` files loaded into the agent |
 | `ASSIGNED_TO_FILTER` | *(all)* | Comma-separated names to filter bugs by assignee |
 | `STATE_DIR` | .state | State file directory |
 | `COST_LOG_PATH` | `<STATE_DIR>/cost-ledger.jsonl` | Cost ledger: one JSON line per processed work item with outcome, USD and per-step token spend. Same format as DevOpsCoder's ledger. Dry runs never write to it |
+| `PIPELINE_VARIANT` | legacy | `legacy`: one investigation pass. `triage`: a cheap triage pass (classification, missing info, duplicate search) and a deep dive only for complete bugs and investigations. Compare both with `bench:run` before switching |
+| `TRIAGE_MODEL` | claude-haiku-5-5 | Model for the triage pass; the deep dive uses `CLAUDE_MODEL` |
+| `TRIAGE_PROMPT_PATH` | src/prompts/triage.md | Triage prompt |
+| `DEEP_PROMPT_PATH` | src/prompts/investigate-deep.md | Deep dive prompt used by the triage pipeline |
 
 ## Commands
 
@@ -98,6 +102,9 @@ The service runs as a Docker container on an Azure VM. Target repositories and t
 |---------|-------------|
 | `bun run start` | Start the watcher (polls every N minutes) |
 | `bun run once` | Run a single poll cycle and exit |
+| `bun run bench:collect` | Collect benchmark cases: closed bugs with a linked fix PR or commit (`--ids` for specific items) |
+| `bun run bench:run` | Replay cases at their pre-fix commit and score each variant on cost and fix-file recall (`--variant legacy,triage`, `--subscription` to use the claude.ai login) |
+| `bun run bench:report` | Summarize one or more results files and write CSV |
 | `bun run run-bug -- <id>` | Investigate a single bug and post results to Azure DevOps |
 | `bun src/cli/index.ts test-bug <id>` | Investigate a single bug in dry-run mode |
 | `bun src/cli/index.ts reset-state` | Clear processed bug state |
