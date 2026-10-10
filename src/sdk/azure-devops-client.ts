@@ -21,7 +21,8 @@ export async function adoFetch<T>(
   path: string,
   options?: RequestInit,
 ): Promise<T> {
-  const url = `${config.orgUrl}/${config.project}/_apis/${path}`;
+  // An absolute URL reaches another host, such as almsearch for Work Item Search.
+  const url = /^https?:\/\//.test(path) ? path : `${config.orgUrl}/${config.project}/_apis/${path}`;
   const authHeader =
     'Basic ' + Buffer.from(':' + config.pat).toString('base64');
 
@@ -409,8 +410,17 @@ export interface SearchWorkItemsOptions {
   top?: number;
 }
 
+interface WorkItemSearchResponse {
+  results?: Array<{ fields: Record<string, string | undefined> }>;
+}
+
+/** Replays drop items created after the cutoff locally, so they ask for more. */
+const REPLAY_SEARCH_TOP = 200;
+
 /**
- * Work items whose title or description contain every keyword, newest first.
+ * Work items containing every keyword, best match first, via Work Item Search.
+ * WIQL CONTAINS on Title/Description scans the whole project and cost
+ * hundreds of TSTUs per call, which got the shared PAT throttled.
  * For duplicate detection, so closed items are included.
  */
 export async function searchWorkItems(
@@ -418,48 +428,43 @@ export async function searchWorkItems(
   keywords: string[],
   options: SearchWorkItemsOptions,
 ): Promise<WorkItemSummary[]> {
-  const words = keywords.map((k) => k.trim()).filter(Boolean).slice(0, 6);
+  // Quoted so search syntax (t:, a=, -) in a keyword stays a plain term; terms are ANDed.
+  const words = keywords.map((k) => k.replace(/"/g, '').trim()).filter(Boolean).slice(0, 6);
   if (words.length === 0) return [];
 
-  const terms = words.map((w) => {
-    const v = escapeWiql(w);
-    return `([System.Title] CONTAINS '${v}' OR [System.Description] CONTAINS WORDS '${v}')`;
-  });
-  const clauses = [
-    `[System.TeamProject] = @project`,
-    `[System.Id] <> ${options.excludeId}`,
-    `[System.WorkItemType] IN ('Bug', 'User Story', 'Feature', 'Task')`,
-    ...(options.createdBefore ? [`[System.CreatedDate] < '${escapeWiql(options.createdBefore)}'`] : []),
-    ...terms,
-  ];
-  const wiql = `SELECT [System.Id] FROM WorkItems WHERE ${clauses.join(' AND ')} ORDER BY [System.ChangedDate] DESC`;
-
   const top = options.top ?? 20;
-  const data = await adoFetchWithRetry<WiqlFlatResponse>(
+  const data = await adoFetchWithRetry<WorkItemSearchResponse>(
     config,
-    `wit/wiql?$top=${top}&timePrecision=true&api-version=7.0`,
-    { method: 'POST', body: JSON.stringify({ query: wiql }) },
+    `https://almsearch.dev.azure.com/${config.org}/${encodeURIComponent(config.project)}/_apis/search/workitemsearchresults?api-version=7.1`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        searchText: words.map((w) => `"${w}"`).join(' '),
+        $skip: 0,
+        $top: options.createdBefore ? REPLAY_SEARCH_TOP : top + 1,
+        filters: {
+          'System.TeamProject': [config.project],
+          'System.WorkItemType': ['Bug', 'User Story', 'Feature', 'Task'],
+        },
+        // Relevance order: matches are broad (stemmed, every text field), so newest-first buries the duplicate.
+        $orderBy: null,
+        includeFacets: false,
+      }),
+    },
   );
-  const ids = (data.workItems ?? []).map((w) => w.id).slice(0, top);
-  if (ids.length === 0) return [];
 
-  const fields = 'System.Title,System.WorkItemType,System.State,System.CreatedDate';
-  const items = await adoFetchWithRetry<WorkItemsBatchResponse>(
-    config,
-    `wit/workitems?ids=${ids.join(',')}&fields=${fields}&api-version=7.0`,
-  );
-  const byId = new Map((items.value ?? []).map((i) => [i.id, i]));
-  return ids.flatMap((id) => {
-    const item = byId.get(id);
-    if (!item) return [];
-    return [{
-      id,
-      title: String(item.fields['System.Title'] ?? ''),
-      type: String(item.fields['System.WorkItemType'] ?? ''),
-      state: String(item.fields['System.State'] ?? ''),
-      createdDate: String(item.fields['System.CreatedDate'] ?? ''),
-    }];
-  });
+  const cutoff = options.createdBefore ? Date.parse(options.createdBefore) : undefined;
+  return (data.results ?? [])
+    .map(({ fields: f }) => ({
+      id: Number(f['system.id']),
+      title: f['system.title'] ?? '',
+      type: f['system.workitemtype'] ?? '',
+      state: f['system.state'] ?? '',
+      createdDate: f['system.createddate'] ?? '',
+    }))
+    .filter((r) => r.id && r.id !== options.excludeId)
+    .filter((r) => cutoff === undefined || Date.parse(r.createdDate) < cutoff)
+    .slice(0, top);
 }
 
 // --- Benchmark helpers: closed bugs and the files their fixes changed ---

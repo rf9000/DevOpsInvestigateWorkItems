@@ -903,30 +903,42 @@ describe('getWorkItemComments', () => {
 });
 
 describe('searchWorkItems', () => {
-  test('requires every keyword, excludes the item, applies the cutoff and keeps WIQL order', async () => {
-    setSequentialMockFetch(
-      { body: { workItems: [{ id: 9 }, { id: 8 }] } },
-      {
-        body: {
-          value: [
-            { id: 8, fields: { 'System.Title': 'B', 'System.WorkItemType': 'Bug', 'System.State': 'Closed', 'System.CreatedDate': 'c8' } },
-            { id: 9, fields: { 'System.Title': "A's", 'System.WorkItemType': 'User Story', 'System.State': 'New', 'System.CreatedDate': 'c9' } },
-          ],
-        },
-      },
-    );
+  const hit = (id: number, title: string, created: string) => ({
+    fields: {
+      'system.id': String(id),
+      'system.title': title,
+      'system.workitemtype': 'Bug',
+      'system.state': 'Closed',
+      'system.createddate': created,
+    },
+  });
 
-    const result = await searchWorkItems(mockConfig(), ["O'Brien", 'export', ' '], { excludeId: 5, createdBefore: '2026-01-01T00:00:00Z' });
+  test('uses Work Item Search with quoted keywords, excludes the item and keeps result order', async () => {
+    setMockFetch({ count: 3, results: [hit(9, "A's", '2025-06-01T00:00:00Z'), hit(5, 'self', '2025-01-01T00:00:00Z'), hit(8, 'B', '2025-05-01T00:00:00Z')] });
+
+    const result = await searchWorkItems(mockConfig(), ['O"Brien', 'export', ' '], { excludeId: 5 });
 
     expect(result.map((r) => r.id)).toEqual([9, 8]);
-    expect(result[0]).toEqual({ id: 9, title: "A's", type: 'User Story', state: 'New', createdDate: 'c9' });
-    expect(String(mockFn.mock.calls[0]![0])).toContain('timePrecision=true');
-    const body = JSON.parse((mockFn.mock.calls[0]![1] as RequestInit).body as string) as { query: string };
-    expect(body.query).toContain('[System.Id] <> 5');
-    expect(body.query).toContain("[System.CreatedDate] < '2026-01-01T00:00:00Z'");
-    expect(body.query).toContain("[System.Title] CONTAINS 'O''Brien'");
-    expect(body.query).toContain("[System.Description] CONTAINS WORDS 'export'");
-    expect(body.query).not.toContain("CONTAINS ' '");
+    expect(result[0]).toEqual({ id: 9, title: "A's", type: 'Bug', state: 'Closed', createdDate: '2025-06-01T00:00:00Z' });
+    expect(String(mockFn.mock.calls[0]![0])).toBe(
+      'https://almsearch.dev.azure.com/my-org/my-project/_apis/search/workitemsearchresults?api-version=7.1',
+    );
+    const body = JSON.parse((mockFn.mock.calls[0]![1] as RequestInit).body as string) as {
+      searchText: string; $top: number; filters: Record<string, string[]>;
+    };
+    expect(body.searchText).toBe('"OBrien" "export"');
+    expect(body.$top).toBe(21);
+    expect(body.filters['System.TeamProject']).toEqual(['my-project']);
+  });
+
+  test('replay drops items created at or after the cutoff and asks for more results', async () => {
+    setMockFetch({ results: [hit(9, 'new', '2026-02-01T00:00:00Z'), hit(8, 'same', '2026-01-01T00:00:00Z'), hit(7, 'old', '2025-12-31T23:59:59Z')] });
+
+    const result = await searchWorkItems(mockConfig(), ['export'], { excludeId: 5, createdBefore: '2026-01-01T00:00:00Z' });
+
+    expect(result.map((r) => r.id)).toEqual([7]);
+    const body = JSON.parse((mockFn.mock.calls[0]![1] as RequestInit).body as string) as { $top: number };
+    expect(body.$top).toBe(200);
   });
 
   test('no keywords means no API call', async () => {

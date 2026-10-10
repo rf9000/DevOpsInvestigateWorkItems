@@ -105,7 +105,7 @@ export function createAdoToolServer(
     tools: [
       tool(
         'search_work_items',
-        'Search Azure DevOps work items (any state) whose title or description contain ALL the given keywords. Returns up to 20, newest first. Use 1-3 distinctive keywords per search; run several searches with different words.',
+        'Search Azure DevOps work items (any state) whose text fields (title, description, repro steps, ...) contain ALL the given keywords. Returns up to 20, best match first. Use 1-3 distinctive keywords per search; run several searches with different words.',
         { keywords: z.array(z.string()).min(1).max(6) },
         async (args) => safely(() => searchTool(config, scope, args.keywords, deps)),
         { annotations: { readOnlyHint: true } },
