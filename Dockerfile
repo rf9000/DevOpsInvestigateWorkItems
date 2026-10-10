@@ -12,8 +12,12 @@ RUN bun install --frozen-lockfile
 # Copy application source
 COPY . .
 
-# Create non-root user for Claude Code (refuses --dangerously-skip-permissions as root)
-RUN useradd -m -s /bin/bash claude && \
+# Create non-root user for Claude Code (refuses --dangerously-skip-permissions as root).
+# Align claude to UID/GID 1000 so it matches the host user that owns the bind-mounted
+# ~/.claude — otherwise the host (1000) and container clash over that shared dir (EACCES).
+# The base oven/bun image already holds 1000 for its `bun` user, so renumber it out first.
+RUN usermod -u 1100 bun && groupmod -g 1100 bun && \
+    useradd -m -s /bin/bash -u 1000 -U claude && \
     chown -R claude:claude /app && \
     mkdir -p /repos && \
     mkdir -p /tmp && chmod 1777 /tmp
