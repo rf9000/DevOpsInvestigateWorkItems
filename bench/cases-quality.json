@@ -1,0 +1,14 @@
+[
+  {
+    "id": 85188,
+    "title": "Payment Journal Setup is not deleted when its payment journal batch or template is deleted",
+    "source": "none",
+    "baseCommit": "af5a92103cf0918b8691fb87fc9f076136d21930",
+    "fixFiles": [],
+    "fixLinks": [],
+    "expectFindings": [
+      "OnRename",
+      "upgrade"
+    ]
+  }
+]

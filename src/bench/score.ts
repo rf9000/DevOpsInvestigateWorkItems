@@ -40,6 +40,12 @@ function sameFile(a: string, b: string): boolean {
   return a === b || a.endsWith(`/${b}`) || b.endsWith(`/${a}`);
 }
 
+/** The expected findings a report mentions, by case-insensitive substring. */
+export function matchFindings(markdown: string, expected: string[]): string[] {
+  const text = markdown.toLowerCase();
+  return expected.filter((f) => text.includes(f.toLowerCase()));
+}
+
 export interface RefScore {
   /** Share of fix files that at least one ref points at. */
   fileRecall: number;

@@ -120,7 +120,9 @@ describe('renderTriageReport', () => {
     expect(md).toContain('- `app/Export.Codeunit.al:42`: loop bound');
     expect(md).toContain('- `app/Line.Table.al`');
     expect(md).toContain('1. Create a suggestion\n2. Export');
-    expect(md).toContain('### Ambiguities & Doubts\nNone identified.');
+    expect(md).not.toContain('### Ambiguities & Doubts');
+    expect(renderTriageReport(mockConfig(), triage(), 'investigate', investigation({ ambiguities: ['Which format?'] })))
+      .toContain('### Ambiguities & Doubts\n- Which format?');
     expect(md).not.toContain('### Risks');
     expect(md).not.toContain('Not investigated');
   });

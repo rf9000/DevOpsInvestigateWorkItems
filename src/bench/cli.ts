@@ -21,7 +21,7 @@ Usage:
                         --ids: exactly these items; ones with no fix link run
                         at HEAD as unscored cases (cost and behavior only)
   bun run bench:run     [--variant legacy[,triage]] [--repeat 1] [--limit N]
-                        [--cases 1,2,3] [--max-usd X] [--in bench/cases.json]
+                        [--cases 1,2,3] [--max-usd X] [--in bench/cases.json[,more.json]]
                         [--subscription]  use the claude.ai login, not ANTHROPIC_API_KEY
   bun run bench:report  <results.jsonl> [more.jsonl ...]
 
@@ -93,9 +93,14 @@ switch (command) {
       console.log('Auth: claude.ai subscription login (ANTHROPIC_API_KEY ignored). Costs below are API-equivalent, not billed.\n');
     }
     const config = loadConfig();
-    const casesPath = flag('in') ?? 'bench/cases.json';
-    if (!existsSync(casesPath)) throw new Error(`${casesPath} not found; run bench:collect first`);
-    let cases = JSON.parse(readFileSync(casesPath, 'utf-8')) as BenchCase[];
+    const casesPaths = (flag('in') ?? 'bench/cases.json').split(',').map((s) => s.trim()).filter(Boolean);
+    let cases: BenchCase[] = [];
+    for (const casesPath of casesPaths) {
+      if (!existsSync(casesPath)) throw new Error(`${casesPath} not found; run bench:collect first`);
+      for (const c of JSON.parse(readFileSync(casesPath, 'utf-8')) as BenchCase[]) {
+        if (!cases.some((x) => x.id === c.id)) cases.push(c);
+      }
+    }
 
     const only = flag('cases')?.split(',').map((s) => Number(s.trim()));
     if (only) cases = cases.filter((c) => only.includes(c.id));
@@ -107,10 +112,11 @@ switch (command) {
     const maxUsd = numberFlag('max-usd');
     const runId = new Date().toISOString().replace(/[:.]/g, '-');
     const outPath = join('bench', 'results', `${runId}-${variants.join('+')}.jsonl`);
-    mkdirSync(dirname(outPath), { recursive: true });
+    const reportsDir = outPath.replace(/\.jsonl$/, '');
+    mkdirSync(reportsDir, { recursive: true });
 
     console.log(`Running ${cases.length} case(s) x ${repeat} repeat(s) x [${variants.join(', ')}]${maxUsd !== undefined ? `, budget $${maxUsd}` : ''}`);
-    console.log(`Results: ${outPath}\n`);
+    console.log(`Results: ${outPath}\nReports: ${reportsDir}/\n`);
     await pruneWorktrees(config.targetRepoPath);
 
     const result = await runBench(config, cases, { variants, repeat, runId, ...(maxUsd !== undefined ? { maxUsd } : {}) }, {
@@ -118,6 +124,10 @@ switch (command) {
       createWorktree: (commit) => createWorktree(config.targetRepoPath, commit),
       appendRow: (row) => {
         appendFileSync(outPath, JSON.stringify(row) + '\n', 'utf-8');
+        // The comment each run would post, as a file to read when judging text quality.
+        if (row.markdown !== undefined) {
+          writeFileSync(join(reportsDir, `${row.caseId}-${row.variant}-r${row.repeat}.md`), row.markdown, 'utf-8');
+        }
         console.log(`  [${row.variant}] #${row.caseId} r${row.repeat}: ${row.outcome} | $${row.costUsd.toFixed(2)} | ${row.turns} turns | ${(row.durationMs / 1000).toFixed(0)}s | recall ${Math.round(row.fileRecall * 100)}%${row.error ? ` | ${row.error}` : ''}`);
       },
       now: () => Date.now(),

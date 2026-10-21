@@ -14,6 +14,8 @@ export interface BenchCase {
   /** Repo paths changed by every fix link, deduplicated. Empty means unscored. */
   fixFiles: string[];
   fixLinks: string[];
+  /** Terms a good report mentions, added by hand: key side effects or conditions. Matched case-insensitively. */
+  expectFindings?: string[];
 }
 
 export interface ArtifactLink {

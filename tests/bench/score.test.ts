@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { normalizePath, extractCodeRefs, scoreRefs } from '../../src/bench/score.ts';
+import { normalizePath, extractCodeRefs, scoreRefs, matchFindings } from '../../src/bench/score.ts';
 
 describe('normalizePath', () => {
   test('lowercases, uses forward slashes, strips leading ./ and / and line suffixes', () => {
@@ -52,5 +52,12 @@ describe('scoreRefs', () => {
     const s = scoreRefs([], fix);
     expect(s.fileRecall).toBe(0);
     expect(s.refPrecision).toBeNull();
+  });
+});
+
+describe('matchFindings', () => {
+  test('returns the expected terms the report mentions, ignoring case', () => {
+    expect(matchFindings('Check `UpdateAmountToPayAndDiscounts` and the last due date.', ['updateamounttopayanddiscounts', 'Last Due Date', 'OnRename']))
+      .toEqual(['updateamounttopayanddiscounts', 'Last Due Date']);
   });
 });

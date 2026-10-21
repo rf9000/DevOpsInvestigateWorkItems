@@ -24,7 +24,7 @@ const legacy: VariantFn = async (config, workItemId) => {
  * deep dive's structured code references; a gated case scores its triage hints.
  * `overrides` swaps models per stage so model choices are compared on the same cases.
  */
-function triageVariant(overrides: Partial<Pick<AppConfig, 'triageModel' | 'claudeModel'>> = {}): VariantFn {
+function triageVariant(overrides: Partial<Pick<AppConfig, 'triageModel' | 'claudeModel' | 'deepPromptPath'>> = {}): VariantFn {
   return async (config, workItemId) => {
     const run = await runTriagePipeline({ ...config, ...overrides }, workItemId, { replay: true });
     const outcome = run.outcome === 'completed' && run.route && run.route !== 'investigate'

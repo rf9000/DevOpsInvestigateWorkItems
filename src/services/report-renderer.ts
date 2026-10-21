@@ -45,7 +45,7 @@ export function renderTriageReport(
   ];
 
   if (route === 'needs_info') {
-    out.push('', '### Questions for the reporter', 'The agent needs answers before it can investigate:', '', bullets(triage.questionsForReporter));
+    out.push('', '### Questions for the reporter', bullets(triage.questionsForReporter));
     if (triage.missingInfo.length > 0) out.push('', '**Missing:**', bullets(triage.missingInfo));
   }
 
@@ -77,8 +77,7 @@ export function renderTriageReport(
     }
     out.push('', '### Suggested Fix', investigation.suggestedFix);
     if (investigation.risks) out.push('', '### Risks', investigation.risks);
-    out.push('', '### Ambiguities & Doubts',
-      investigation.ambiguities.length > 0 ? bullets(investigation.ambiguities) : 'None identified.');
+    if (investigation.ambiguities.length > 0) out.push('', '### Ambiguities & Doubts', bullets(investigation.ambiguities));
   }
 
   return out.join('\n');

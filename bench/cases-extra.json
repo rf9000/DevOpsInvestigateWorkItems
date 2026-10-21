@@ -1,0 +1,57 @@
+[
+  {
+    "id": 84629,
+    "title": "changes to IBAN look up behaviour in norway",
+    "source": "pr",
+    "baseCommit": "249ddb9cbe02905eccc6ccb5a40a1152cf4f9cf2",
+    "fixFiles": [
+      "/base-application-test/Bank Account/BankInfoLookupUT.Codeunit.al",
+      "/base-application/Bank Account/Codeunits/BankInformation.Codeunit.al",
+      "/base-application/Upgrade/UpgradeTag.Codeunit.al",
+      "/base-application/Upgrade/UpgradeTo29xxx.Codeunit.al"
+    ],
+    "fixLinks": [
+      "commit:ccf103fdf854a0bee1363b8b84acb9ac14d98302",
+      "pr:58507"
+    ]
+  },
+  {
+    "id": 83136,
+    "title": "Payment information setup on Vendor - missing possibilities",
+    "source": "none",
+    "baseCommit": "af5a92103cf0918b8691fb87fc9f076136d21930",
+    "fixFiles": [],
+    "fixLinks": []
+  },
+  {
+    "id": 83287,
+    "title": "Payment Suggestion Templates: On Create new, fill some fields with default values from ExportSetup or PmtJnl Setup and add adding 3 more fields",
+    "source": "none",
+    "baseCommit": "af5a92103cf0918b8691fb87fc9f076136d21930",
+    "fixFiles": [],
+    "fixLinks": []
+  },
+  {
+    "id": 84030,
+    "title": "Remittance \"warning\"",
+    "source": "none",
+    "baseCommit": "af5a92103cf0918b8691fb87fc9f076136d21930",
+    "fixFiles": [],
+    "fixLinks": []
+  },
+  {
+    "id": 84484,
+    "title": "Payment allocations are validated with the full document amount instead of their own amount",
+    "source": "pr",
+    "baseCommit": "5f798b35207cf026257c36bbfd1003b071aab8a9",
+    "fixFiles": [
+      "/export/Payment Validation/Codeunits/CreateAndValPurchase.Codeunit.al",
+      "/export/Payment Validation/Codeunits/CreateAndValSales.Codeunit.al",
+      "/export/Direct Debit/Pages/DirectDebitJournal.Page.al",
+      "/export/General/PageExtensions/PaymentJournal.PageExt.al"
+    ],
+    "fixLinks": [
+      "pr:58258"
+    ]
+  }
+]

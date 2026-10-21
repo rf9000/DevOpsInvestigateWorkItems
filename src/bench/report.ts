@@ -20,6 +20,10 @@ export interface VariantSummary {
   anyHitRate: number;
   /** Over scored runs that cited at least one file. */
   meanPrecision: number | null;
+  /** Length of the comment that would be posted, over completed runs; null when none kept markdown. */
+  meanReportChars: number | null;
+  /** Share of expected findings mentioned, over runs whose case lists any; null when none do. */
+  findingRate: number | null;
 }
 
 const mean = (xs: number[]) => (xs.length === 0 ? 0 : xs.reduce((a, b) => a + b, 0) / xs.length);
@@ -39,6 +43,11 @@ function groupBy<K, T>(items: T[], key: (t: T) => K): Map<K, T[]> {
   return groups;
 }
 
+/** Characters in the comment a run would post, the bench's measure of report verbosity. */
+export function reportChars(r: BenchRow): number | null {
+  return r.markdown === undefined ? null : r.markdown.length;
+}
+
 export function summarize(rows: BenchRow[]): VariantSummary[] {
   return [...groupBy(rows, (r) => r.variant)].map(([variant, rs]) => {
     // Rows written before `scored` existed always had a fix.
@@ -53,6 +62,11 @@ export function summarize(rows: BenchRow[]): VariantSummary[] {
     }
     const precisions = scored.map((r) => r.refPrecision).filter((p): p is number => p !== null);
     const totalUsd = rs.reduce((n, r) => n + r.costUsd, 0);
+    // Gated runs post a short triage-only comment, so they would skew the mean.
+    const withFindings = rs.filter((r) => r.expectedFindings?.length);
+    const expectedCount = withFindings.reduce((n, r) => n + r.expectedFindings!.length, 0);
+    const foundCount = withFindings.reduce((n, r) => n + (r.foundFindings?.length ?? 0), 0);
+    const chars = rs.filter((r) => r.outcome === 'completed').map(reportChars).filter((n): n is number => n !== null);
 
     return {
       variant,
@@ -69,6 +83,8 @@ export function summarize(rows: BenchRow[]): VariantSummary[] {
       meanRecallInvestigated: mean(completed.map((r) => r.fileRecall)),
       anyHitRate: mean(scored.map((r) => (r.anyFileHit ? 1 : 0))),
       meanPrecision: precisions.length === 0 ? null : mean(precisions),
+      meanReportChars: chars.length === 0 ? null : mean(chars),
+      findingRate: expectedCount === 0 ? null : foundCount / expectedCount,
     };
   });
 }
@@ -83,11 +99,11 @@ export function renderReport(rows: BenchRow[]): string {
   const lines: string[] = [];
 
   lines.push('## Summary', '');
-  lines.push('| variant | runs | scored | failed | gated | total cost | mean cost | mean time | p90 time | mean turns | recall (all) | recall (investigated) | any hit | precision |');
-  lines.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');
+  lines.push('| variant | runs | scored | failed | gated | total cost | mean cost | mean time | p90 time | mean turns | recall (all) | recall (investigated) | any hit | precision | report chars | findings |');
+  lines.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');
   for (const s of summaries) {
     const gated = Object.entries(s.gated).map(([k, v]) => `${k}: ${v}`).join(', ') || '-';
-    lines.push(`| ${s.variant} | ${s.runs} | ${s.scoredRuns} | ${s.failed} | ${gated} | ${usd(s.totalUsd)} | ${usd(s.meanUsd)} | ${secs(s.meanDurationMs)} | ${secs(s.p90DurationMs)} | ${s.meanTurns.toFixed(1)} | ${pct(s.meanRecall)} | ${pct(s.meanRecallInvestigated)} | ${pct(s.anyHitRate)} | ${s.meanPrecision === null ? '-' : pct(s.meanPrecision)} |`);
+    lines.push(`| ${s.variant} | ${s.runs} | ${s.scoredRuns} | ${s.failed} | ${gated} | ${usd(s.totalUsd)} | ${usd(s.meanUsd)} | ${secs(s.meanDurationMs)} | ${secs(s.p90DurationMs)} | ${s.meanTurns.toFixed(1)} | ${pct(s.meanRecall)} | ${pct(s.meanRecallInvestigated)} | ${pct(s.anyHitRate)} | ${s.meanPrecision === null ? '-' : pct(s.meanPrecision)} | ${s.meanReportChars === null ? '-' : Math.round(s.meanReportChars)} | ${s.findingRate === null ? '-' : pct(s.findingRate)} |`);
   }
 
   // Per case: mean over repeats, with the recall range to show run-to-run variance.
@@ -115,7 +131,7 @@ export function renderReport(rows: BenchRow[]): string {
 
 const CSV_COLUMNS = [
   'runId', 'variant', 'caseId', 'title', 'repeat', 'outcome', 'error', 'costUsd', 'turns', 'durationMs',
-  'models', 'scored', 'fileRecall', 'anyFileHit', 'refPrecision', 'matchedFixFiles', 'codeRefs', 'fixFiles',
+  'models', 'scored', 'fileRecall', 'anyFileHit', 'refPrecision', 'reportChars', 'foundFindings', 'expectedFindings', 'matchedFixFiles', 'codeRefs', 'fixFiles',
 ] as const;
 
 function csvCell(value: unknown): string {
@@ -125,6 +141,6 @@ function csvCell(value: unknown): string {
 
 export function toCsv(rows: BenchRow[]): string {
   const lines = [CSV_COLUMNS.join(',')];
-  for (const r of rows) lines.push(CSV_COLUMNS.map((c) => csvCell(r[c])).join(','));
+  for (const r of rows) lines.push(CSV_COLUMNS.map((c) => csvCell(c === 'reportChars' ? reportChars(r) : r[c])).join(','));
   return lines.join('\n') + '\n';
 }

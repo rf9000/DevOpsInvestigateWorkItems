@@ -71,6 +71,14 @@ describe('runBench', () => {
     expect(legacy2.durationMs).toBe(1000);
     expect(legacy2.runId).toBe('r1');
     expect(legacy2.scored).toBe(true);
+    expect(legacy2.expectedFindings).toBeUndefined();
+  });
+
+  test('scores expected findings against the report markdown', async () => {
+    const withFindings: BenchCase[] = [{ ...cases[0]!, expectFindings: ['md', 'missing'] }];
+    const result = await runBench(mockConfig(), withFindings, { variants: ['legacy'], repeat: 1, runId: 'r' }, makeDeps({ legacy: variant(1, []) }));
+    expect(result.rows[0]!.foundFindings).toEqual(['md']);
+    expect(result.rows[0]!.expectedFindings).toEqual(['md', 'missing']);
   });
 
   test('stops before the next run once the budget is spent', async () => {

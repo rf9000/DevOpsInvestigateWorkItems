@@ -12,7 +12,7 @@ export const CLASSIFICATIONS = [
 export const triageResultSchema = z.object({
   classification: z.enum(CLASSIFICATIONS)
     .describe('bug: code defect. investigation: needs code analysis but is not clearly a defect. The rest need no code deep dive.'),
-  summary: z.string().describe('One or two sentences: what the reporter experiences or asks for.'),
+  summary: z.string().describe('One sentence: what the reporter experiences or asks for.'),
   area: z.string().describe('Functional area or module, e.g. "Remittance advice export". Empty when unknown.'),
   severityGuess: z.enum(['critical', 'high', 'medium', 'low', 'unknown']),
   completeness: z.enum(['sufficient', 'needs_info'])
@@ -26,7 +26,7 @@ export const triageResultSchema = z.object({
     reason: z.string(),
   })).describe('Existing work items describing the same problem. Only items you opened and compared.'),
   likelyFiles: z.array(z.string()).describe('Repo files you found that are probably involved, if any. Helps the deep dive start.'),
-  rationale: z.string().describe('Why this classification and route, in two or three sentences.'),
+  rationale: z.string().describe('Why this classification and route, in one sentence.'),
 });
 
 export type TriageResult = z.infer<typeof triageResultSchema>;
@@ -35,16 +35,16 @@ export const investigationResultSchema = z.object({
   validity: z.enum(['valid', 'invalid', 'uncertain'])
     .describe('Whether code was found that causes the described behavior.'),
   confidence: z.enum(['high', 'medium', 'low']),
-  rootCause: z.string().describe('Why it happens, referencing files and lines. Markdown allowed.'),
+  rootCause: z.string().describe('Why it happens, referencing files and lines. At most three sentences. Markdown allowed.'),
   codeReferences: z.array(z.object({
     path: z.string().describe('Repo-relative file path.'),
     line: z.number().int().nullable(),
-    note: z.string(),
+    note: z.string().describe('What changes here, in at most 10 words.'),
   })).describe('Every file a fix would most likely change, most important first.'),
-  reproduction: z.array(z.string()).describe('Steps to reproduce.'),
-  suggestedFix: z.string().describe('Short, precise, actionable. Markdown allowed.'),
-  risks: z.string().describe('What the fix could break, or an empty string.'),
-  ambiguities: z.array(z.string()),
+  reproduction: z.array(z.string()).describe('Steps to reproduce, at most eight, one action each.'),
+  suggestedFix: z.string().describe('At most three bullets, one change each. Markdown allowed.'),
+  risks: z.string().describe('What the fix could break, in the format the instructions give, or an empty string.'),
+  ambiguities: z.array(z.string()).describe('Open questions, at most five. Include scope gaps the report missed, such as renames or existing data. Empty when none.'),
 });
 
 export type InvestigationResult = z.infer<typeof investigationResultSchema>;

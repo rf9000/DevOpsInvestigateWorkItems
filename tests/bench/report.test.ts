@@ -41,6 +41,26 @@ describe('summarize', () => {
 
     expect(triage!.gated).toEqual({ needs_info: 1 });
     expect(triage!.meanRecallInvestigated).toBe(1);
+    expect(legacy!.meanReportChars).toBeNull();
+  });
+
+  test('report length averages completed runs only', () => {
+    const [s] = summarize([
+      row({ markdown: 'abcd' }),
+      row({ markdown: 'ab' }),
+      row({ outcome: 'gated:duplicate', markdown: 'a'.repeat(100) }),
+    ]);
+    expect(s!.meanReportChars).toBe(3);
+    expect(s!.findingRate).toBeNull();
+  });
+
+  test('finding rate counts found over expected findings across runs', () => {
+    const [s] = summarize([
+      row({ expectedFindings: ['a', 'b'], foundFindings: ['a'] }),
+      row({ expectedFindings: ['a', 'b'], foundFindings: ['a', 'b'] }),
+      row({}),
+    ]);
+    expect(s!.findingRate).toBe(0.75);
   });
 });
 

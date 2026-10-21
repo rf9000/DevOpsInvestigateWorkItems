@@ -1,0 +1,77 @@
+[
+  {
+    "id": 84934,
+    "title": "Direct debit mandates are still blocked from journal lines when sales document validation is off",
+    "source": "none",
+    "baseCommit": "af5a92103cf0918b8691fb87fc9f076136d21930",
+    "fixFiles": [],
+    "fixLinks": []
+  },
+  {
+    "id": 84950,
+    "title": "Duplicate Pmt. journal lines",
+    "source": "pr",
+    "baseCommit": "894cff405babbc8fffd0b6b4bc60290906041ed5",
+    "fixFiles": [
+      "/export-test/Corresponding Bank/UT/CorrespondingBankUT.Codeunit.al",
+      "/export-test/Payment Suggestion/UT/GenJnlCreationUT.Codeunit.al",
+      "/export/Payment Suggestion/Codeunits/GenJnlCreationMgt.Codeunit.al"
+    ],
+    "fixLinks": [
+      "pr:58752"
+    ]
+  },
+  {
+    "id": 84868,
+    "title": "Account name drill-down no longer errors on reconciliation lines without a valid account",
+    "source": "pr",
+    "baseCommit": "c78635268c0a9a79466daa65506d2417d53e44dc",
+    "fixFiles": [
+      "/import-test/Payment Application Review/UI/ApplRvwAccountUI.Codeunit.al",
+      "/import/Bank Account Reconciliation/BankAccReconLine.TableExt.al"
+    ],
+    "fixLinks": [
+      "commit:a83c620ff15c01f1bc48cf92ca80f2d51ae6f496",
+      "pr:58619"
+    ]
+  },
+  {
+    "id": 84456,
+    "title": "Payment Allocation Entries with On Hold Marker",
+    "source": "pr",
+    "baseCommit": "a983b76a5e3312d618b50497231c7c182712a53b",
+    "fixFiles": [
+      "/export-test/Payment Allocation/UT/ExpAllocMgtUT.Codeunit.al",
+      "/export/Payment Allocation/Codeunits/ExportAllocationMgt.Codeunit.al",
+      "/export/Payment Suggestion/Tables/PaymentSuggestionLine.Table.al",
+      "/export/Remittance Advice/Pages/RemInfoEntries.PageExt.al"
+    ],
+    "fixLinks": [
+      "commit:5078e2578dabb38d5143ee85016bf5a59718c781",
+      "commit:5401690baba0a8078dcfaeef0b68c6b8cd0f178f",
+      "pr:58283",
+      "commit:e4094ee30a3089013cdb981510dc2cfcd065f62a",
+      "commit:41508934578f9991a10a139784317d2f36d2f40f"
+    ],
+    "expectFindings": [
+      "UpdateAmountToPayAndDiscounts",
+      "Last Due Date"
+    ]
+  },
+  {
+    "id": 84742,
+    "title": "Bank Code required validation fails in the advanced payment journal even when the bank account has a bank code",
+    "source": "pr",
+    "baseCommit": "d502cd448b983f426ea44438c6d0508500153c29",
+    "fixFiles": [
+      "/export/Payment Validation/Codeunits/CreateAndValPmtEntrSugg.Codeunit.al"
+    ],
+    "fixLinks": [
+      "commit:23f03e7b68656e63bfbb6639b5ada05475d7bb48",
+      "pr:58536",
+      "commit:249ddb9cbe02905eccc6ccb5a40a1152cf4f9cf2",
+      "commit:50662f0b460418ea8e422648b357f6a0d1a92881",
+      "commit:2c5245f4132007c791b8ac3e0db921b3e1b45f8a"
+    ]
+  }
+]

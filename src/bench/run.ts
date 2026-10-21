@@ -2,7 +2,7 @@ import type { AppConfig, StepSpend } from '../types/index.ts';
 import type { SpendTracker } from '../services/spend-tracker.ts';
 import { createSpendTracker } from '../services/spend-tracker.ts';
 import type { BenchCase } from './collect.ts';
-import { scoreRefs } from './score.ts';
+import { matchFindings, scoreRefs } from './score.ts';
 
 /** What one variant produced for one case. Nothing is posted. */
 export interface VariantOutput {
@@ -40,6 +40,9 @@ export interface BenchRow {
   fileRecall: number;
   anyFileHit: boolean;
   refPrecision: number | null;
+  /** Present when the case lists expected findings. */
+  expectedFindings?: string[];
+  foundFindings?: string[];
   markdown?: string;
 }
 
@@ -110,6 +113,9 @@ export async function runBench(
       fixFiles: c.fixFiles,
       scored: c.fixFiles.length > 0,
       ...score,
+      ...(c.expectFindings?.length
+        ? { expectedFindings: c.expectFindings, foundFindings: matchFindings(out.markdown ?? '', c.expectFindings) }
+        : {}),
       ...(out.markdown !== undefined ? { markdown: out.markdown } : {}),
     };
     totalUsd += row.costUsd;
