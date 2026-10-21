@@ -201,6 +201,26 @@ describe('runPollCycle', () => {
     expect(deps.processBug).toHaveBeenCalledTimes(1);
   });
 
+  test('passes the tag trigger only for tagged items', async () => {
+    const config = mockConfig();
+    stateStore.markProcessed(200);
+    stateStore.save();
+
+    const deps = makeDeps({
+      queryBugsUnderFeatures: mock(() => Promise.resolve([200, 201])),
+      queryTaggedWorkItems: mock(() => Promise.resolve([200])),
+      processBug: mock((_cfg: AppConfig, bugId: number) =>
+        Promise.resolve({ bugId, investigated: true }),
+      ),
+    });
+
+    await runPollCycle(config, stateStore, deps);
+
+    const calls = (deps.processBug as ReturnType<typeof mock>).mock.calls;
+    expect(calls.find((c) => c[1] === 200)![4]).toBe('tag');
+    expect(calls.find((c) => c[1] === 201)![4]).toBe('new');
+  });
+
   test('tag is removed after successful reinvestigation', async () => {
     const config = mockConfig();
 

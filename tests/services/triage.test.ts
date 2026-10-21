@@ -239,6 +239,7 @@ function processorDeps(overrides: Partial<ProcessorDeps> = {}): ProcessorDeps {
     discoverTargetRepoSkills: mock(() => []),
     downloadAttachment: mock(() => Promise.reject(new Error('no images'))),
     recordCost: mock((_c: AppConfig, _e: CostRecord) => {}),
+    getWorkItemUpdates: mock(() => Promise.resolve([])),
     ...overrides,
   };
 }

@@ -133,6 +133,30 @@ export interface CostRecord {
   costUsd: number;
   /** Keyed by step: `investigate`, plus `triage` for the triage pipeline. */
   perStage: Record<string, StepSpend>;
+  /**
+   * Who caused the run: a lowercased email (reinvestigate tag adder),
+   * `automatic` (new item picked up by the watcher) or `unknown`. Absent in
+   * records written before this was tracked.
+   */
+  triggeredBy?: string;
+}
+
+/** An ADO identity as reported on work item revisions. */
+export interface IdentityRef {
+  id?: string;
+  displayName?: string;
+  uniqueName?: string;
+}
+
+/**
+ * One revision from `/workItems/{id}/updates`. `fields` maps a field reference
+ * name to its old/new value for that revision.
+ */
+export interface WorkItemUpdate {
+  id?: number;
+  revisedBy?: IdentityRef;
+  revisedDate?: string;
+  fields?: Record<string, { oldValue?: unknown; newValue?: unknown }>;
 }
 
 /** Result summary after processing a single bug. */

@@ -5,6 +5,7 @@ import type {
   ImageAttachment,
   WorkItemComment,
   WorkItemResponse,
+  WorkItemUpdate,
 } from '../types/index.ts';
 import type { InvestigationContext } from './investigator.ts';
 import type { AttachmentDownload } from '../sdk/azure-devops-client.ts';
@@ -23,6 +24,7 @@ import * as deep from './deep-investigator.ts';
 import { extractImageUrls, stripHtmlToText } from '../utils/html.ts';
 import { createSpendTracker } from './spend-tracker.ts';
 import { appendCostRecord } from '../state/cost-ledger.ts';
+import { AUTOMATIC, lookupTriggeredBy } from '../utils/triggered-by.ts';
 import { routeFor } from './triage-schemas.ts';
 import { renderTriageReport } from './report-renderer.ts';
 
@@ -52,7 +54,12 @@ export interface ProcessorDeps {
   ) => Promise<AttachmentDownload>;
 
   recordCost: (config: AppConfig, entry: CostRecord) => void;
+
+  getWorkItemUpdates: (config: AppConfig, workItemId: number) => Promise<WorkItemUpdate[]>;
 }
+
+/** What started a run: the watcher found a new item, or someone added the reinvestigate tag. */
+export type RunTrigger = 'tag' | 'new';
 
 const defaultDeps: ProcessorDeps = {
   getWorkItem: sdk.getWorkItem,
@@ -61,6 +68,7 @@ const defaultDeps: ProcessorDeps = {
   discoverTargetRepoSkills: sl.discoverTargetRepoSkills,
   downloadAttachment: sdk.downloadAttachment,
   recordCost: (config, entry) => appendCostRecord(config.costLogPath, entry),
+  getWorkItemUpdates: sdk.getWorkItemUpdates,
 };
 
 /** What the triage pipeline needs on top of ProcessorDeps. */
@@ -94,16 +102,25 @@ function log(message: string): void {
 
 // The ledger is bookkeeping for the dashboard, so a failed write must never
 // change the outcome of a bug. Dry runs post nothing, so they record nothing.
-function safeRecordCost(
+async function safeRecordCost(
   deps: ProcessorDeps,
   config: AppConfig,
   bugId: number,
   title: string | undefined,
   spend: SpendTracker,
   outcome: CostRecord['outcome'],
-): void {
+  trigger: RunTrigger,
+): Promise<void> {
   if (config.dryRun) return;
   try {
+    // lookupTriggeredBy never throws, so a failed lookup cannot cost us the ledger line.
+    const triggeredBy = trigger === 'new'
+      ? AUTOMATIC
+      : await lookupTriggeredBy(
+        () => deps.getWorkItemUpdates(config, bugId),
+        [config.reinvestigateTag],
+        (msg) => log(`  Bug #${bugId}: ${msg}`),
+      );
     deps.recordCost(config, {
       at: new Date().toISOString(),
       workItemId: bugId,
@@ -112,6 +129,7 @@ function safeRecordCost(
       variant: config.pipelineVariant,
       costUsd: spend.totalUsd(),
       perStage: spend.snapshot(),
+      triggeredBy,
     });
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
@@ -333,6 +351,7 @@ export async function processBug(
   bugId: number,
   deps: ProcessorDeps = defaultDeps,
   triageDeps: TriageDeps = defaultTriageDeps,
+  trigger: RunTrigger = 'new',
 ): Promise<BugProcessResult> {
   log(`Processing Bug #${bugId}...`);
 
@@ -344,7 +363,7 @@ export async function processBug(
   if (run.outcome === 'failed' || run.markdown === undefined) {
     const errorMsg = run.error ?? 'unknown error';
     log(`  Bug #${bugId}: Error — ${errorMsg}`);
-    safeRecordCost(deps, config, bugId, title, spend, 'failed');
+    await safeRecordCost(deps, config, bugId, title, spend, 'failed', trigger);
     return { bugId, investigated: false, error: errorMsg };
   }
 
@@ -357,12 +376,12 @@ export async function processBug(
     const commentHtml = await marked(run.markdown);
     await deps.addWorkItemComment(config, bugId, commentHtml);
     log(`  Bug #${bugId}: Investigation posted as comment`);
-    safeRecordCost(deps, config, bugId, title, spend, 'completed');
+    await safeRecordCost(deps, config, bugId, title, spend, 'completed', trigger);
     return { bugId, investigated: true };
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
     log(`  Bug #${bugId}: Error — ${errorMsg}`);
-    safeRecordCost(deps, config, bugId, title, spend, 'failed');
+    await safeRecordCost(deps, config, bugId, title, spend, 'failed', trigger);
     return { bugId, investigated: false, error: errorMsg };
   }
 }

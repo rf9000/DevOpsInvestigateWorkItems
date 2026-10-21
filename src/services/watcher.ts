@@ -5,6 +5,7 @@ import type {
 import { StateStore } from '../state/state-store.ts';
 import * as sdk from '../sdk/azure-devops-client.ts';
 import * as proc from './processor.ts';
+import type { ProcessorDeps, RunTrigger, TriageDeps } from './processor.ts';
 
 export interface WatcherDeps {
   queryBugsUnderFeatures: (
@@ -20,6 +21,9 @@ export interface WatcherDeps {
   processBug: (
     config: AppConfig,
     bugId: number,
+    deps?: ProcessorDeps,
+    triageDeps?: TriageDeps,
+    trigger?: RunTrigger,
   ) => Promise<BugProcessResult>;
 
   removeTagFromWorkItem: (
@@ -91,7 +95,9 @@ export async function runPollCycle(
     }
 
     try {
-      const result = await deps.processBug(config, bugId);
+      const result = await deps.processBug(
+        config, bugId, undefined, undefined, taggedSet.has(bugId) ? 'tag' : 'new',
+      );
 
       if (result.investigated) {
         stateStore.markProcessed(bugId);

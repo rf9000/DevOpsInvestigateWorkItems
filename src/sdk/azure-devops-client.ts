@@ -3,6 +3,7 @@ import type {
   WorkItemComment,
   WorkItemResponse,
   WorkItemSummary,
+  WorkItemUpdate,
 } from '../types/index.ts';
 import { stripHtmlToText } from '../utils/html.ts';
 
@@ -400,6 +401,18 @@ export async function getWorkItemComments(
       text: stripHtmlToText(c.text ?? ''),
     }))
     .reverse();
+}
+
+/** The work item's revision history, oldest first. */
+export async function getWorkItemUpdates(
+  config: AppConfig,
+  workItemId: number,
+): Promise<WorkItemUpdate[]> {
+  const data = await adoFetchWithRetry<{ value?: WorkItemUpdate[] }>(
+    config,
+    `wit/workItems/${workItemId}/updates?api-version=7.1`,
+  );
+  return data.value ?? [];
 }
 
 export interface SearchWorkItemsOptions {

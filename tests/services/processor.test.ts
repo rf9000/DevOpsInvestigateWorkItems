@@ -54,6 +54,7 @@ function makeDeps(overrides: Partial<ProcessorDeps> = {}): ProcessorDeps {
     ),
     // Mocked so tests never write a ledger into the repo's .state.
     recordCost: mock((_cfg: AppConfig, _entry: CostRecord) => {}),
+    getWorkItemUpdates: mock(() => Promise.resolve([])),
     ...overrides,
   };
 }
@@ -319,6 +320,40 @@ describe('processBug cost ledger', () => {
   function recorded(deps: ProcessorDeps): CostRecord[] {
     return (deps.recordCost as ReturnType<typeof mock>).mock.calls.map((c) => c[1] as CostRecord);
   }
+
+  test('a new item is recorded as automatic without fetching its history', async () => {
+    const deps = makeDeps({ investigateBug: spendingInvestigation('report') });
+
+    await processBug(mockConfig(), 100, deps);
+
+    expect(recorded(deps)[0]!.triggeredBy).toBe('automatic');
+    expect(deps.getWorkItemUpdates).not.toHaveBeenCalled();
+  });
+
+  test('a tagged item is recorded as whoever added the reinvestigate tag', async () => {
+    const deps = makeDeps({
+      investigateBug: spendingInvestigation('report'),
+      getWorkItemUpdates: mock(() => Promise.resolve([
+        { revisedBy: { uniqueName: 'Ann@X.com' }, fields: { 'System.Tags': { newValue: 'agent investigate' } } },
+      ])),
+    });
+
+    await processBug(mockConfig(), 100, deps, undefined, 'tag');
+
+    expect(recorded(deps)[0]!.triggeredBy).toBe('ann@x.com');
+  });
+
+  test('a failed history lookup records unknown and still writes the ledger line', async () => {
+    const deps = makeDeps({
+      investigateBug: spendingInvestigation('report'),
+      getWorkItemUpdates: mock(() => Promise.reject(new Error('ADO down'))),
+    });
+
+    const result = await processBug(mockConfig(), 100, deps, undefined, 'tag');
+
+    expect(result.investigated).toBe(true);
+    expect(recorded(deps)[0]!.triggeredBy).toBe('unknown');
+  });
 
   test('success writes one completed record with title and the tracked spend', async () => {
     const deps = makeDeps({ investigateBug: spendingInvestigation('report') });
