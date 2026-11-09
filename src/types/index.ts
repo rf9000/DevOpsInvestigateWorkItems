@@ -139,6 +139,8 @@ export interface CostRecord {
    * records written before this was tracked.
    */
   triggeredBy?: string;
+  /** Joins this line to its tool-usage.jsonl line. Absent in records written before tool usage was tracked. */
+  runId?: string;
 }
 
 /** An ADO identity as reported on work item revisions. */

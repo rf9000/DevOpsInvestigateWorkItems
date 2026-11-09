@@ -12,6 +12,8 @@ import { processBug, runTriagePipeline } from '../../src/services/processor.ts';
 import type { ProcessorDeps, TriageDeps } from '../../src/services/processor.ts';
 import { runStructuredAgent } from '../../src/services/agent-runner.ts';
 import type { QueryFn } from '../../src/services/agent-runner.ts';
+import { createToolUsageCollector } from '../../src/services/tool-usage-collector.ts';
+import type { ToolUsageRecord } from '../../src/services/tool-usage-collector.ts';
 
 function mockConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
@@ -239,16 +241,29 @@ function processorDeps(overrides: Partial<ProcessorDeps> = {}): ProcessorDeps {
     discoverTargetRepoSkills: mock(() => []),
     downloadAttachment: mock(() => Promise.reject(new Error('no images'))),
     recordCost: mock((_c: AppConfig, _e: CostRecord) => {}),
+    recordToolUsage: mock((_c: AppConfig, _r: ToolUsageRecord) => {}),
     getWorkItemUpdates: mock(() => Promise.resolve([])),
     ...overrides,
   };
 }
 
+function grepMessage() {
+  return { type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'Grep', input: { pattern: 'x' } }] } } as never;
+}
+
 function triageDeps(result: TriageResult, overrides: Partial<TriageDeps> = {}): TriageDeps {
   return {
     getWorkItemComments: mock(() => Promise.resolve([{ author: 'Ann', createdDate: '2026-02-02', text: 'Only SEPA' }])),
-    triage: mock(async (_c, _ctx, _s, onSpend) => { onSpend?.(spendCall); return result; }),
-    investigateDeep: mock(async (_c, _ctx, _t, onSpend) => { onSpend?.({ ...spendCall, usd: 1 }); return investigation(); }),
+    triage: mock(async (_c, _ctx, _s, onSpend, collector) => {
+      collector?.observe(grepMessage());
+      onSpend?.(spendCall);
+      return result;
+    }),
+    investigateDeep: mock(async (_c, _ctx, _t, onSpend, collector) => {
+      collector?.observe(grepMessage());
+      onSpend?.({ ...spendCall, usd: 1 });
+      return investigation();
+    }),
     ...overrides,
   };
 }
@@ -314,6 +329,55 @@ describe('runTriagePipeline', () => {
 });
 
 describe('processBug with PIPELINE_VARIANT=triage', () => {
+  function usageOf(deps: ProcessorDeps): ToolUsageRecord[] {
+    return (deps.recordToolUsage as ReturnType<typeof mock>).mock.calls.map((c) => c[1] as ToolUsageRecord);
+  }
+  function costOf(deps: ProcessorDeps): CostRecord[] {
+    return (deps.recordCost as ReturnType<typeof mock>).mock.calls.map((c) => c[1] as CostRecord);
+  }
+
+  test('writes the same runId and at on the ledger line and the tool line', async () => {
+    const deps = processorDeps();
+    await processBug(mockConfig(), 100, deps, triageDeps(triage()));
+
+    const [cost] = costOf(deps);
+    const [usage] = usageOf(deps);
+    expect(cost!.runId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(usage!.runId).toBe(cost!.runId!);
+    expect(usage!.workItemId).toBe(100);
+    expect(usage!.at).toBe(cost!.at);
+    expect(usage!.tools.Grep).toBe(2);
+  });
+
+  test('a failed run still writes a tool line with the same runId', async () => {
+    const deps = processorDeps();
+    const tDeps = triageDeps(triage(), { investigateDeep: mock(() => Promise.reject(new Error('max turns'))) });
+    await processBug(mockConfig(), 100, deps, tDeps);
+
+    expect(costOf(deps)[0]!.outcome).toBe('failed');
+    expect(usageOf(deps)).toHaveLength(1);
+    expect(usageOf(deps)[0]!.runId).toBe(costOf(deps)[0]!.runId!);
+    expect(usageOf(deps)[0]!.tools.Grep).toBe(1);
+  });
+
+  test('a dry run writes neither line', async () => {
+    const deps = processorDeps();
+    await processBug(mockConfig({ dryRun: true }), 100, deps, triageDeps(triage()));
+    expect(costOf(deps)).toHaveLength(0);
+    expect(usageOf(deps)).toHaveLength(0);
+  });
+
+  test('a failing ledger write does not skip the tool line, and vice versa', async () => {
+    const deps = processorDeps({ recordCost: mock(() => { throw new Error('disk full'); }) });
+    await processBug(mockConfig(), 100, deps, triageDeps(triage()));
+    expect(usageOf(deps)).toHaveLength(1);
+
+    const deps2 = processorDeps({ recordToolUsage: mock(() => { throw new Error('disk full'); }) });
+    const result = await processBug(mockConfig(), 100, deps2, triageDeps(triage()));
+    expect(result.investigated).toBe(true);
+    expect(costOf(deps2)).toHaveLength(1);
+  });
+
   test('posts the rendered triage comment and records the variant', async () => {
     const deps = processorDeps({
       getWorkItem: mock(() => Promise.resolve({
@@ -357,6 +421,27 @@ describe('runStructuredAgent', () => {
     expect(out).toEqual(triage());
     expect(spent).toHaveLength(1);
     expect(spent[0]!.usd).toBe(0.5);
+  });
+
+  test('feeds the collector and merges its hooks with the Bash guard', async () => {
+    const seen: { hooks?: Record<string, unknown> }[] = [];
+    const queryFn = ((args: { options: { hooks?: Record<string, unknown> } }) => {
+      seen.push(args.options);
+      return (async function* () {
+        yield { type: 'system', subtype: 'init', cwd: '.', skills: [], agents: [], slash_commands: [], plugins: [], mcp_servers: [] };
+        yield { type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'Read', input: { file_path: 'a' } }] } };
+        yield resultMessage('success', triage());
+      })();
+    }) as unknown as QueryFn;
+    const collector = createToolUsageCollector();
+
+    await runStructuredAgent({ ...base, collector }, queryFn);
+
+    const rec = collector.record({ runId: 'r', workItemId: 1, at: 'now' });
+    expect(rec.tools.Read).toBe(1);
+    expect(rec.sessions).toBe(1);
+    expect(seen[0]!.hooks).toHaveProperty('PreToolUse');
+    expect(seen[0]!.hooks).toHaveProperty('InstructionsLoaded');
   });
 
   test('throws on a non-success result after recording spend', async () => {

@@ -15,6 +15,7 @@ import type { AdoToolScope } from './ado-tools.ts';
 import type { WorkItemContext } from './triager.ts';
 import type { InvestigationResult, TriageResult, TriageRoute } from './triage-schemas.ts';
 
+import { randomUUID } from 'node:crypto';
 import { marked } from 'marked';
 import * as sdk from '../sdk/azure-devops-client.ts';
 import * as inv from './investigator.ts';
@@ -23,6 +24,8 @@ import * as triager from './triager.ts';
 import * as deep from './deep-investigator.ts';
 import { extractImageUrls, stripHtmlToText } from '../utils/html.ts';
 import { createSpendTracker } from './spend-tracker.ts';
+import { appendToolUsage, createToolUsageCollector } from './tool-usage-collector.ts';
+import type { ToolUsageCollector, ToolUsageRecord } from './tool-usage-collector.ts';
 import { appendCostRecord } from '../state/cost-ledger.ts';
 import { AUTOMATIC, lookupTriggeredBy } from '../utils/triggered-by.ts';
 import { routeFor } from './triage-schemas.ts';
@@ -38,6 +41,7 @@ export interface ProcessorDeps {
     config: AppConfig,
     context: InvestigationContext,
     onSpend?: SpendSink,
+    collector?: ToolUsageCollector,
   ) => Promise<string>;
 
   addWorkItemComment: (
@@ -55,6 +59,8 @@ export interface ProcessorDeps {
 
   recordCost: (config: AppConfig, entry: CostRecord) => void;
 
+  recordToolUsage: (config: AppConfig, record: ToolUsageRecord) => void;
+
   getWorkItemUpdates: (config: AppConfig, workItemId: number) => Promise<WorkItemUpdate[]>;
 }
 
@@ -68,6 +74,7 @@ const defaultDeps: ProcessorDeps = {
   discoverTargetRepoSkills: sl.discoverTargetRepoSkills,
   downloadAttachment: sdk.downloadAttachment,
   recordCost: (config, entry) => appendCostRecord(config.costLogPath, entry),
+  recordToolUsage: (config, record) => appendToolUsage(config.costLogPath, record),
   getWorkItemUpdates: sdk.getWorkItemUpdates,
 };
 
@@ -79,19 +86,21 @@ export interface TriageDeps {
     ctx: WorkItemContext,
     scope: AdoToolScope,
     onSpend?: SpendSink,
+    collector?: ToolUsageCollector,
   ) => Promise<TriageResult>;
   investigateDeep: (
     config: AppConfig,
     ctx: WorkItemContext,
     triage: TriageResult,
     onSpend?: SpendSink,
+    collector?: ToolUsageCollector,
   ) => Promise<InvestigationResult>;
 }
 
 const defaultTriageDeps: TriageDeps = {
   getWorkItemComments: (config, id) => sdk.getWorkItemComments(config, id, 10),
-  triage: (config, ctx, scope, onSpend) => triager.triageWorkItem(config, ctx, scope, onSpend),
-  investigateDeep: (config, ctx, t, onSpend) => deep.investigateDeep(config, ctx, t, onSpend),
+  triage: (config, ctx, scope, onSpend, collector) => triager.triageWorkItem(config, ctx, scope, onSpend, collector),
+  investigateDeep: (config, ctx, t, onSpend, collector) => deep.investigateDeep(config, ctx, t, onSpend, collector),
 };
 
 function log(message: string): void {
@@ -108,10 +117,14 @@ async function safeRecordCost(
   bugId: number,
   title: string | undefined,
   spend: SpendTracker,
+  collector: ToolUsageCollector | undefined,
   outcome: CostRecord['outcome'],
   trigger: RunTrigger,
 ): Promise<void> {
   if (config.dryRun) return;
+  // One id and timestamp for both lines, so the dashboard can join them.
+  const runId = randomUUID();
+  const at = new Date().toISOString();
   try {
     // lookupTriggeredBy never throws, so a failed lookup cannot cost us the ledger line.
     const triggeredBy = trigger === 'new'
@@ -122,7 +135,8 @@ async function safeRecordCost(
         (msg) => log(`  Bug #${bugId}: ${msg}`),
       );
     deps.recordCost(config, {
-      at: new Date().toISOString(),
+      at,
+      runId,
       workItemId: bugId,
       ...(title !== undefined ? { title } : {}),
       outcome,
@@ -135,6 +149,13 @@ async function safeRecordCost(
     const errMsg = err instanceof Error ? err.message : String(err);
     log(`  Bug #${bugId}: Skipping cost ledger write — ${errMsg}`);
   }
+  if (!collector) return;
+  try {
+    deps.recordToolUsage(config, collector.record({ runId, workItemId: bugId, at }));
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    log(`  Bug #${bugId}: Skipping tool usage write — ${errMsg}`);
+  }
 }
 
 /** What one pipeline run produced. Nothing has been posted or recorded yet. */
@@ -146,6 +167,8 @@ export interface PipelineResult {
   markdown?: string;
   error?: string;
   spend: SpendTracker;
+  /** What tools the run used; written next to the ledger line. */
+  collector?: ToolUsageCollector;
   /** Triage pipeline only: where triage sent the item. */
   route?: TriageRoute;
   /** Triage pipeline only: files the report points at. */
@@ -236,6 +259,7 @@ export async function runPipeline(
   deps: ProcessorDeps = defaultDeps,
 ): Promise<PipelineResult> {
   const spend = createSpendTracker();
+  const collector = createToolUsageCollector();
   let title: string | undefined;
 
   try {
@@ -252,21 +276,21 @@ export async function runPipeline(
 
     log(`  Bug #${bugId}: Starting investigation...`);
     const output = await deps.investigateBug(config, context, (call) =>
-      spend.add('investigate', call),
+      spend.add('investigate', call), collector,
     );
 
     if (!output || !output.trim()) {
-      return { outcome: 'failed', title, error: 'Investigation returned empty result', spend };
+      return { outcome: 'failed', title, error: 'Investigation returned empty result', spend, collector };
     }
 
     // Strip any preamble before first ### header
     const headerIndex = output.indexOf('### ');
     const cleanedOutput = headerIndex > 0 ? output.slice(headerIndex) : output;
 
-    return { outcome: 'completed', title, markdown: cleanedOutput + reinvestigateFooter(config), spend };
+    return { outcome: 'completed', title, markdown: cleanedOutput + reinvestigateFooter(config), spend, collector };
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    return { outcome: 'failed', title, error: errorMsg, spend };
+    return { outcome: 'failed', title, error: errorMsg, spend, collector };
   }
 }
 
@@ -290,6 +314,7 @@ export async function runTriagePipeline(
   triageDeps: TriageDeps = defaultTriageDeps,
 ): Promise<PipelineResult> {
   const spend = createSpendTracker();
+  const collector = createToolUsageCollector();
   let title: string | undefined;
 
   try {
@@ -322,14 +347,14 @@ export async function runTriagePipeline(
     };
 
     log(`  Bug #${bugId}: Triaging...`);
-    const t = await triageDeps.triage(config, ctx, scope, (call) => spend.add('triage', call));
+    const t = await triageDeps.triage(config, ctx, scope, (call) => spend.add('triage', call), collector);
     const route = routeFor(t, item.type);
     log(`  Bug #${bugId}: Triage: ${t.classification}, ${t.completeness}, route ${route}`);
 
     let investigation: InvestigationResult | undefined;
     if (route === 'investigate') {
       log(`  Bug #${bugId}: Starting deep investigation...`);
-      investigation = await triageDeps.investigateDeep(config, ctx, t, (call) => spend.add('investigate', call));
+      investigation = await triageDeps.investigateDeep(config, ctx, t, (call) => spend.add('investigate', call), collector);
     }
 
     return {
@@ -337,12 +362,13 @@ export async function runTriagePipeline(
       title,
       markdown: renderTriageReport(config, t, route, investigation) + reinvestigateFooter(config),
       spend,
+      collector,
       route,
       codeRefs: investigation ? investigation.codeReferences.map((r) => r.path) : t.likelyFiles,
     };
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    return { outcome: 'failed', title, error: errorMsg, spend };
+    return { outcome: 'failed', title, error: errorMsg, spend, collector };
   }
 }
 
@@ -358,12 +384,12 @@ export async function processBug(
   const run = config.pipelineVariant === 'triage'
     ? await runTriagePipeline(config, bugId, {}, deps, triageDeps)
     : await runPipeline(config, bugId, deps);
-  const { title, spend } = run;
+  const { title, spend, collector } = run;
 
   if (run.outcome === 'failed' || run.markdown === undefined) {
     const errorMsg = run.error ?? 'unknown error';
     log(`  Bug #${bugId}: Error — ${errorMsg}`);
-    await safeRecordCost(deps, config, bugId, title, spend, 'failed', trigger);
+    await safeRecordCost(deps, config, bugId, title, spend, collector, 'failed', trigger);
     return { bugId, investigated: false, error: errorMsg };
   }
 
@@ -376,12 +402,12 @@ export async function processBug(
     const commentHtml = await marked(run.markdown);
     await deps.addWorkItemComment(config, bugId, commentHtml);
     log(`  Bug #${bugId}: Investigation posted as comment`);
-    await safeRecordCost(deps, config, bugId, title, spend, 'completed', trigger);
+    await safeRecordCost(deps, config, bugId, title, spend, collector, 'completed', trigger);
     return { bugId, investigated: true };
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
     log(`  Bug #${bugId}: Error — ${errorMsg}`);
-    await safeRecordCost(deps, config, bugId, title, spend, 'failed', trigger);
+    await safeRecordCost(deps, config, bugId, title, spend, collector, 'failed', trigger);
     return { bugId, investigated: false, error: errorMsg };
   }
 }

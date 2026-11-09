@@ -2,6 +2,7 @@ import type { AppConfig } from '../types/index.ts';
 import { runStructuredAgent } from './agent-runner.ts';
 import { buildSystemPrompt } from './investigator.ts';
 import type { SpendSink } from './spend-tracker.ts';
+import type { ToolUsageCollector } from './tool-usage-collector.ts';
 import { renderWorkItem } from './triager.ts';
 import type { RunAgent, WorkItemContext } from './triager.ts';
 import { investigationResultSchema } from './triage-schemas.ts';
@@ -25,6 +26,7 @@ export async function investigateDeep(
   ctx: WorkItemContext,
   triage: TriageResult,
   onSpend?: SpendSink,
+  collector?: ToolUsageCollector,
   runAgent: RunAgent = runStructuredAgent,
 ): Promise<InvestigationResult> {
   return runAgent({
@@ -38,5 +40,6 @@ export async function investigateDeep(
     tools: ['Read', 'Grep', 'Glob', 'Bash', 'Skill', 'LSP'],
     schema: investigationResultSchema,
     ...(onSpend ? { onSpend } : {}),
+    ...(collector ? { collector } : {}),
   });
 }

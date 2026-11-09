@@ -329,11 +329,11 @@ describe('investigateBug result handling', () => {
 
   test('an API error reported as a success result throws instead of becoming the report', async () => {
     const query = fakeQuery([result({ is_error: true, result: 'API Error: 400 Claude Code 2.1.263 does not support this model' })]);
-    await expect(investigateBug(config, context, undefined, query)).rejects.toThrow('Claude API error: API Error: 400');
+    await expect(investigateBug(config, context, undefined, undefined, query)).rejects.toThrow('Claude API error: API Error: 400');
   });
 
   test('a normal success returns the report', async () => {
     const query = fakeQuery([result({ result: '### Bug Validity\nYes\n### Root Cause\nX' })]);
-    expect(await investigateBug(config, context, undefined, query)).toContain('### Root Cause');
+    expect(await investigateBug(config, context, undefined, undefined, query)).toContain('### Root Cause');
   });
 });

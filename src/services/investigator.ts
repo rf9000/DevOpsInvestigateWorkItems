@@ -6,6 +6,8 @@ import type { AppConfig, ImageAttachment } from '../types/index.ts';
 import type { DiscoveredSkill } from './skill-loader.ts';
 import { spendFromAgentResult } from './spend-tracker.ts';
 import type { SpendSink } from './spend-tracker.ts';
+import { withToolUsageHooks } from './tool-usage-collector.ts';
+import type { ToolUsageCollector } from './tool-usage-collector.ts';
 
 const DENIED_BASH_PATTERNS = [
   /\bgit\s+(push|commit|merge|rebase|reset|checkout|branch\s+-[dD]|stash\s+drop|clean|tag\s+-d)/,
@@ -112,6 +114,7 @@ export async function investigateBug(
   config: AppConfig,
   context: InvestigationContext,
   onSpend?: SpendSink,
+  collector?: ToolUsageCollector,
   queryFn: typeof query = query,
 ): Promise<string> {
   const systemPrompt = buildSystemPrompt(config.promptPath, context.discoveredSkills);
@@ -144,7 +147,7 @@ export async function investigateBug(
       disallowedTools: ['Edit', 'Write', 'NotebookEdit'],
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
-      hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [denyDestructiveBash] }] },
+      hooks: withToolUsageHooks({ PreToolUse: [{ matcher: 'Bash', hooks: [denyDestructiveBash] }] }, collector),
       systemPrompt: {
         type: 'preset',
         preset: 'claude_code',
@@ -154,6 +157,7 @@ export async function investigateBug(
       cwd: config.targetRepoPath,
     },
   })) {
+    collector?.observe(message);
     if (message.type === 'assistant') {
       turnCount++;
       const text = extractAssistantText(message);

@@ -4,6 +4,7 @@ import { processBug, runPipeline } from '../../src/services/processor.ts';
 import type { ProcessorDeps } from '../../src/services/processor.ts';
 import type { InvestigationContext } from '../../src/services/investigator.ts';
 import type { SpendSink } from '../../src/services/spend-tracker.ts';
+import type { ToolUsageCollector, ToolUsageRecord } from '../../src/services/tool-usage-collector.ts';
 
 function mockConfig(): AppConfig {
   return {
@@ -54,6 +55,7 @@ function makeDeps(overrides: Partial<ProcessorDeps> = {}): ProcessorDeps {
     ),
     // Mocked so tests never write a ledger into the repo's .state.
     recordCost: mock((_cfg: AppConfig, _entry: CostRecord) => {}),
+    recordToolUsage: mock((_cfg: AppConfig, _record: ToolUsageRecord) => {}),
     getWorkItemUpdates: mock(() => Promise.resolve([])),
     ...overrides,
   };
@@ -320,6 +322,21 @@ describe('processBug cost ledger', () => {
   function recorded(deps: ProcessorDeps): CostRecord[] {
     return (deps.recordCost as ReturnType<typeof mock>).mock.calls.map((c) => c[1] as CostRecord);
   }
+
+  test('the legacy pipeline writes a tool line with the ledger runId', async () => {
+    const deps = makeDeps({
+      investigateBug: mock((_c: AppConfig, _ctx: InvestigationContext, _s?: SpendSink, collector?: ToolUsageCollector) => {
+        collector?.observe({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't', name: 'Read', input: {} }] } } as never);
+        return Promise.resolve('### Bug Validity\nYes');
+      }),
+    });
+
+    await processBug(mockConfig(), 100, deps);
+
+    const usage = (deps.recordToolUsage as ReturnType<typeof mock>).mock.calls[0]![1] as ToolUsageRecord;
+    expect(usage.runId).toBe(recorded(deps)[0]!.runId!);
+    expect(usage.tools.Read).toBe(1);
+  });
 
   test('a new item is recorded as automatic without fetching its history', async () => {
     const deps = makeDeps({ investigateBug: spendingInvestigation('report') });

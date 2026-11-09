@@ -6,6 +6,8 @@ import type { ImageAttachment } from '../types/index.ts';
 import { denyDestructiveBash } from './investigator.ts';
 import { spendFromAgentResult } from './spend-tracker.ts';
 import type { SpendSink } from './spend-tracker.ts';
+import { withToolUsageHooks } from './tool-usage-collector.ts';
+import type { ToolUsageCollector } from './tool-usage-collector.ts';
 import { toOutputSchema } from './triage-schemas.ts';
 
 export interface StructuredAgentOptions<T> {
@@ -19,6 +21,8 @@ export interface StructuredAgentOptions<T> {
   mcpServers?: Record<string, McpServerConfig>;
   schema: z.ZodType<T>;
   onSpend?: SpendSink;
+  /** Counts the tools this pass uses; the caller writes the record. */
+  collector?: ToolUsageCollector;
   /** Prefix for the cost log line, e.g. "triage". */
   label: string;
 }
@@ -63,7 +67,7 @@ export async function runStructuredAgent<T>(
       disallowedTools: ['Edit', 'Write', 'NotebookEdit'],
       permissionMode: 'bypassPermissions',
       allowDangerouslySkipPermissions: true,
-      hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [denyDestructiveBash] }] },
+      hooks: withToolUsageHooks({ PreToolUse: [{ matcher: 'Bash', hooks: [denyDestructiveBash] }] }, options.collector),
       systemPrompt: { type: 'preset', preset: 'claude_code', append: options.systemPrompt },
       settingSources: ['project'],
       cwd: options.cwd,
@@ -71,6 +75,7 @@ export async function runStructuredAgent<T>(
       ...(options.mcpServers ? { mcpServers: options.mcpServers } : {}),
     },
   })) {
+    options.collector?.observe(message);
     if (message.type === 'result') {
       const models = Object.keys(message.modelUsage).join(', ') || 'unknown';
       console.log(`  [${options.label}] Cost: $${message.total_cost_usd.toFixed(4)} | ${message.num_turns} turns | ${models}`);

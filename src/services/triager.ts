@@ -5,6 +5,7 @@ import type { AdoToolScope } from './ado-tools.ts';
 import { runStructuredAgent } from './agent-runner.ts';
 import type { DiscoveredSkill } from './skill-loader.ts';
 import type { SpendSink } from './spend-tracker.ts';
+import type { ToolUsageCollector } from './tool-usage-collector.ts';
 import { triageResultSchema } from './triage-schemas.ts';
 import type { TriageResult } from './triage-schemas.ts';
 
@@ -56,6 +57,7 @@ export async function triageWorkItem(
   ctx: WorkItemContext,
   scope: AdoToolScope,
   onSpend?: SpendSink,
+  collector?: ToolUsageCollector,
   runAgent: RunAgent = runStructuredAgent,
 ): Promise<TriageResult> {
   return runAgent({
@@ -70,5 +72,6 @@ export async function triageWorkItem(
     mcpServers: { [ADO_TOOLS_SERVER]: createAdoToolServer(config, scope) },
     schema: triageResultSchema,
     ...(onSpend ? { onSpend } : {}),
+    ...(collector ? { collector } : {}),
   });
 }
