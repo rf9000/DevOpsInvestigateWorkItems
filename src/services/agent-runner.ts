@@ -3,6 +3,7 @@ import type { McpServerConfig, SDKUserMessage } from '@anthropic-ai/claude-agent
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages/messages';
 import type { z } from 'zod';
 import type { ImageAttachment } from '../types/index.ts';
+import { claudeExecutableOption } from './claude-executable.ts';
 import { denyDestructiveBash } from './investigator.ts';
 import { spendFromAgentResult } from './spend-tracker.ts';
 import type { SpendSink } from './spend-tracker.ts';
@@ -71,6 +72,7 @@ export async function runStructuredAgent<T>(
       systemPrompt: { type: 'preset', preset: 'claude_code', append: options.systemPrompt },
       settingSources: ['project'],
       cwd: options.cwd,
+      ...claudeExecutableOption(),
       outputFormat: { type: 'json_schema', schema: toOutputSchema(options.schema) },
       ...(options.mcpServers ? { mcpServers: options.mcpServers } : {}),
     },

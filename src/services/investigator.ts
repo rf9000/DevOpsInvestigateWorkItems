@@ -3,6 +3,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { HookCallback, PermissionResult, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages/messages';
 import type { AppConfig, ImageAttachment } from '../types/index.ts';
+import { claudeExecutableOption } from './claude-executable.ts';
 import type { DiscoveredSkill } from './skill-loader.ts';
 import { spendFromAgentResult } from './spend-tracker.ts';
 import type { SpendSink } from './spend-tracker.ts';
@@ -155,6 +156,8 @@ export async function investigateBug(
       },
       settingSources: ['project'],
       cwd: config.targetRepoPath,
+      // Not pipeline logic: which Claude Code binary runs (see claudeExecutableOption).
+      ...claudeExecutableOption(),
     },
   })) {
     collector?.observe(message);
